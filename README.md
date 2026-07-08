@@ -1,19 +1,92 @@
 # Undo And Restart
 
-## Documentation
+## English
 
+`Undo And Restart` is a Slay the Spire 2 C# mod that adds undo, redo, floor restart, and an action history tab for combat.
+
+### Features
+
+- Undo: default key is left arrow.
+- Redo: default key is right arrow.
+- Restart floor: default key is `F5`.
+- The three hotkeys can be changed from the game's input settings screen.
+- Used cards and potions can be viewed in a grid-based action history tab during combat.
+- Clicking an item in the action history tab restores the corresponding snapshot.
+- The mod settings screen lets players change the maximum snapshot count and show or hide the action history tab.
+
+### Multiplayer Policy
+
+This mod is distributed with `affects_gameplay=false`. Players should still be able to join multiplayer lobbies with the mod installed, but the actual undo and restart features are designed for singleplayer. The code blocks snapshot capture and F5 restart in normal multiplayer runs.
+
+### Documentation
+
+- Architecture notes: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
+- C# file specification: [docs/CS_FILE_SPEC.en.md](docs/CS_FILE_SPEC.en.md)
 - Korean architecture notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- English architecture notes: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
 - Korean C# file specification: [docs/CS_FILE_SPEC.md](docs/CS_FILE_SPEC.md)
-- English C# file specification: [docs/CS_FILE_SPEC.en.md](docs/CS_FILE_SPEC.en.md)
 
-## Development Note
+### Build Requirements
+
+- Windows
+- .NET SDK 9.0
+- Slay the Spire 2 installation
+- Game runtime DLLs: `0Harmony.dll`, `GodotSharp.dll`, `sts2.dll`
+
+The default build path assumes this Steam install location:
+
+```powershell
+D:\Games\Steam\steamapps\common\Slay the Spire 2
+```
+
+If the game is installed somewhere else, pass `Sts2InstallDir` or set the `STS2_INSTALL_DIR` environment variable.
+
+```powershell
+dotnet build .\Undo.csproj -c Release /p:Sts2InstallDir="C:\Path\To\Slay the Spire 2"
+```
+
+Or:
+
+```powershell
+$env:STS2_INSTALL_DIR = "C:\Path\To\Slay the Spire 2"
+dotnet build .\Undo.csproj -c Release
+```
+
+The built DLL is generated here:
+
+```text
+bin\Release\net9.0\UndoAndRestart.dll
+```
+
+### Project Structure
+
+```text
+Undo.csproj
+UndoAndRestart.json
+UndoAndRestartCode/
+docs/
+```
+
+- `Undo.csproj`: C# project file and STS2 runtime DLL references.
+- `UndoAndRestart.json`: STS2 mod manifest.
+- `UndoAndRestartCode/`: mod source code.
+- `docs/ARCHITECTURE.en.md`: snapshot engine and flow documentation.
+- `docs/CS_FILE_SPEC.en.md`: responsibility list for each `.cs` file.
+
+### Repository Notes
+
+- `bin/` and `obj/` are build outputs and should not be committed.
+- STS2 runtime DLLs are part of the game installation and are not included in this repository.
+- Steam Workshop upload packages are managed separately.
+
+### Development Note
 
 The broad refactoring pass, code specifications, and README were drafted with Codex and uploaded after developer review.
 
-`Undo And Restart`는 Slay the Spire 2 전투 중 되돌리기, 다시 실행, 층 다시 시작 기능을 추가하는 C# 모드입니다.
+## 한국어
 
-## 기능
+`Undo And Restart`는 Slay the Spire 2 전투 중 되돌리기, 다시 실행, 층 다시 시작, 사용 기록 탭을 추가하는 C# 모드입니다.
+
+### 기능
 
 - 되돌리기: 기본값은 왼쪽 방향키입니다.
 - 다시 실행: 기본값은 오른쪽 방향키입니다.
@@ -23,11 +96,18 @@ The broad refactoring pass, code specifications, and README were drafted with Co
 - 사용 기록 탭에서 특정 항목을 클릭하면 해당 스냅샷으로 이동합니다.
 - 모드 설정에서 최대 스냅샷 수와 사용 기록 탭 표시 여부를 조절할 수 있습니다.
 
-## 멀티플레이어 정책
+### 멀티플레이어 정책
 
 이 모드는 `affects_gameplay=false`로 배포됩니다. 멀티플레이어 방에는 접속할 수 있어야 하지만, 전투 상태를 직접 되돌리는 기능은 싱글플레이 중심으로 설계되어 있습니다. 코드에서는 일반 멀티플레이어 런에서 스냅샷 캡처와 F5 재시작을 차단합니다.
 
-## 빌드 요구 사항
+### 문서
+
+- 구조 명세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- C# 파일 명세: [docs/CS_FILE_SPEC.md](docs/CS_FILE_SPEC.md)
+- 영어 구조 명세: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
+- 영어 C# 파일 명세: [docs/CS_FILE_SPEC.en.md](docs/CS_FILE_SPEC.en.md)
+
+### 빌드 요구 사항
 
 - Windows
 - .NET SDK 9.0
@@ -59,7 +139,7 @@ dotnet build .\Undo.csproj -c Release
 bin\Release\net9.0\UndoAndRestart.dll
 ```
 
-## 프로젝트 구조
+### 프로젝트 구조
 
 ```text
 Undo.csproj
@@ -74,8 +154,12 @@ docs/
 - `docs/ARCHITECTURE.md`: 스냅샷 엔진과 주요 흐름 설명입니다.
 - `docs/CS_FILE_SPEC.md`: `.cs` 파일별 책임 명세입니다.
 
-## 공개 저장소 주의 사항
+### 공개 저장소 주의 사항
 
 - `bin/`, `obj/`는 빌드 산출물이므로 커밋하지 않습니다.
 - STS2 런타임 DLL은 게임 설치본의 파일이므로 저장소에 포함하지 않습니다.
 - Steam Workshop 업로드 패키지는 별도 폴더에서 관리합니다.
+
+### 개발 노트
+
+전반적인 리팩토링, 코드 명세서, README는 Codex에서 초안을 작성했고 개발자가 검토를 마친 후 업로드되었습니다.
