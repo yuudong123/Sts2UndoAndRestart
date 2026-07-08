@@ -1,5 +1,12 @@
 # Undo And Restart
 
+## Documentation
+
+- Korean architecture notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- English architecture notes: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
+- Korean C# file specification: [docs/CS_FILE_SPEC.md](docs/CS_FILE_SPEC.md)
+- English C# file specification: [docs/CS_FILE_SPEC.en.md](docs/CS_FILE_SPEC.en.md)
+
 `Undo And Restart`는 Slay the Spire 2 전투 중 되돌리기, 다시 실행, 층 다시 시작 기능을 추가하는 C# 모드입니다.
 
 ## 기능
