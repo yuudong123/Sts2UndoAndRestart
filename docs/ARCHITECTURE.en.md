@@ -87,10 +87,10 @@ The manifest uses `affects_gameplay=false` so players can still enter multiplaye
 - `FloorRestartService` blocks F5 restart unless `NetGameType.Singleplayer` is active.
 - The action history overlay is shown only in singleplayer or fake-multiplayer-compatible contexts.
 
-## Main Risk Areas
+## Update-sensitive Areas
 
-- STS2 internal field names: this mod uses reflection and is sensitive to game updates.
-- Action stabilization timing: restoring while a card play node is only half-cleaned can leave VFX residue.
-- Card cost and runtime state: model field restore and UI refresh must stay synchronized.
-- Relic stack display: the model value and UI activation display can diverge and may need cleanup after restore.
-- Rewards and run history: undo and F5 restart must not pollute statistics, reward generation, or run-history calculations.
+- STS2 internal fields: reflected field names and types should be rechecked after game updates.
+- Action stabilization timing: card play, card generation, potion use, and end-turn boundaries should still capture only after player control is restored.
+- Card cost and runtime state: cost-changing effects, this-turn-only costs, and card UI refresh should restore together.
+- Relic stack display: restored model values and UI display values should refresh to the same state.
+- Rewards and run history: F5 restart and undo should not leave accumulated changes in statistics, damage records, or reward calculations.
