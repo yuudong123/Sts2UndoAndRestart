@@ -4,7 +4,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal sealed class CombatVisualSnapshot
 {

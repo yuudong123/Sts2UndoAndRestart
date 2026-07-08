@@ -4,12 +4,12 @@ using MegaCrit.Sts2.Core.Localization.Fonts;
 using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Nodes.Screens.ModdingScreen;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 [HarmonyPatch(typeof(NModInfoContainer), nameof(NModInfoContainer.Fill))]
 internal static class ModSettingsPanelPatch
 {
-    private const string PanelName = "UndoAndRedoForkSettingsPanel";
+    private const string PanelName = "UndoAndRestartSettingsPanel";
 
     private static void Postfix(NModInfoContainer __instance, Mod mod)
     {
@@ -66,7 +66,7 @@ internal static class ModSettingsPanelPatch
         CheckBox historyToggle = new()
         {
             Text = UndoText.ShowHistoryTab,
-            ButtonPressed = UndoAndRedoConfig.ShowActionHistoryOverlay,
+            ButtonPressed = UndoAndRestartConfig.ShowActionHistoryOverlay,
             CustomMinimumSize = new Vector2(260f, 30f),
             FocusMode = Control.FocusModeEnum.None,
         };
@@ -81,7 +81,7 @@ internal static class ModSettingsPanelPatch
 
         LineEdit input = new()
         {
-            Text = UndoAndRedoConfig.SnapshotLimit.ToString(),
+            Text = UndoAndRestartConfig.SnapshotLimit.ToString(),
             CustomMinimumSize = new Vector2(120f, 34f),
             SelectAllOnFocus = true,
         };
@@ -115,8 +115,8 @@ internal static class ModSettingsPanelPatch
 
     private static void SetHistoryOverlayVisible(bool visible)
     {
-        UndoAndRedoConfig.SetShowActionHistoryOverlay(visible, save: true);
-        UndoStackOverlay.Refresh();
+        UndoAndRestartConfig.SetShowActionHistoryOverlay(visible, save: true);
+        ActionHistoryOverlay.Refresh();
     }
 
     private static Label CreateLabel(string text, int fontSize, Color color, FontType fontType)
@@ -134,7 +134,7 @@ internal static class ModSettingsPanelPatch
 
     private static void SaveSnapshotLimit(LineEdit input, Label status)
     {
-        if (UndoAndRedoConfig.TrySetSnapshotLimit(input.Text, out int value))
+        if (UndoAndRestartConfig.TrySetSnapshotLimit(input.Text, out int value))
         {
             input.Text = value.ToString();
             status.Text = UndoText.Saved(value);

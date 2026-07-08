@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Godot;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
-internal static class UndoAndRedoConfig
+internal static class UndoAndRestartConfig
 {
     private const int DefaultSnapshotLimit = 100;
     private static readonly string ConfigPath = Path.Combine(OS.GetUserDataDir(), "mod_configs", "UndoAndRestart.json");

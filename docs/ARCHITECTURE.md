@@ -25,10 +25,10 @@ UndoRedoManager
 CombatSnapshot
   -> 전투, 런, 카드, 플레이어, 크리처, UI 상태 캡처/복원
 
-UndoStackOverlay
+ActionHistoryOverlay
   -> 사용 기록 UI 렌더링
 
-QuickRestartService
+FloorRestartService
   -> F5 층 다시 시작 처리
 ```
 
@@ -57,7 +57,7 @@ QuickRestartService
 
 ## F5 층 다시 시작 흐름
 
-`QuickRestartService`는 현재 싱글플레이 런 저장 데이터를 읽어 현재 방 입장 상태로 돌아갑니다.
+`FloorRestartService`는 현재 싱글플레이 런 저장 데이터를 읽어 현재 방 입장 상태로 돌아갑니다.
 
 - 멀티플레이어에서는 실행하지 않습니다.
 - 액션 큐가 진행 중이면 실행하지 않습니다.
@@ -84,7 +84,7 @@ QuickRestartService
 모드 매니페스트는 `affects_gameplay=false`입니다. 대신 코드에서 실제 상태 변경 기능을 제한합니다.
 
 - `UndoRedoManager.CanCapture`는 일반 멀티플레이어 런에서 캡처를 차단합니다.
-- `QuickRestartService`는 `NetGameType.Singleplayer`가 아니면 F5 재시작을 차단합니다.
+- `FloorRestartService`는 `NetGameType.Singleplayer`가 아니면 F5 재시작을 차단합니다.
 - 사용 기록 UI는 싱글플레이 또는 fake multiplayer 조건에서만 표시됩니다.
 
 ## 주요 위험 지점

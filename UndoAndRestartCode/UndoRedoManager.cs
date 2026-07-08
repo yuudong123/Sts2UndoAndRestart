@@ -8,7 +8,7 @@ using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal static class UndoRedoManager
 {
@@ -17,13 +17,13 @@ internal static class UndoRedoManager
     public const long QuickRestartKeyCode = 4194336;
 
     private static readonly List<CombatSnapshot> Snapshots = new();
-    private static readonly List<UndoStackEntry> ActionEntries = new();
+    private static readonly List<ActionHistoryEntry> ActionEntries = new();
     private static CombatState? _sessionState;
     private static int _cursor = -1;
     private static bool _isRestoring;
     private static int _readyCaptureRequestId;
     private static int? _pendingTurnTransitionTurnNumber;
-    private static readonly List<UndoStackEntry> PendingEntries = new();
+    private static readonly List<ActionHistoryEntry> PendingEntries = new();
 
     public static void Reset()
     {
@@ -33,10 +33,10 @@ internal static class UndoRedoManager
         _pendingTurnTransitionTurnNumber = null;
         PendingEntries.Clear();
         CombatRuntimeStateCleanup.ResetRuntimeBlockerObservation();
-        CreatureLifecycle.Clear();
+        ParkedCreatureNodeRegistry.Clear();
         _readyCaptureRequestId++;
         MainFile.Logger.Info("Combat history reset.");
-        UndoStackOverlay.Refresh();
+        ActionHistoryOverlay.Refresh();
     }
 
     public static bool HandleUndoKey()
@@ -86,7 +86,7 @@ internal static class UndoRedoManager
         await CaptureAfterActionAsync(original, reason, null);
     }
 
-    public static async Task CaptureAfterActionAsync(Task original, string reason, UndoStackEntry? entry)
+    public static async Task CaptureAfterActionAsync(Task original, string reason, ActionHistoryEntry? entry)
     {
         await original;
         if (entry != null)
@@ -116,14 +116,14 @@ internal static class UndoRedoManager
 
         if (PendingEntries.Count > 0)
         {
-            UndoStackEntry entry = PendingEntries[0];
+            ActionHistoryEntry entry = PendingEntries[0];
             PendingEntries.RemoveAt(0);
             entry.SnapshotIndex = snapshotIndex;
             ActionEntries.Add(entry);
             TrimActionEntriesToSnapshots();
         }
 
-        UndoStackOverlay.Refresh();
+        ActionHistoryOverlay.Refresh();
     }
 
     public static void CapturePlayerControlReady()
@@ -137,7 +137,7 @@ internal static class UndoRedoManager
         _ = CapturePlayerControlReadyWhenStable(requestId, source);
     }
 
-    public static IReadOnlyList<UndoStackEntry> GetActionEntries()
+    public static IReadOnlyList<ActionHistoryEntry> GetActionEntries()
     {
         return ActionEntries;
     }
@@ -189,7 +189,7 @@ internal static class UndoRedoManager
             TrimSnapshotsToLimit();
             _cursor = Snapshots.Count - 1;
             MainFile.Logger.Info($"Captured snapshot {_cursor + 1}/{Snapshots.Count}: {reason}");
-            UndoStackOverlay.Refresh();
+            ActionHistoryOverlay.Refresh();
             return _cursor;
         }
         catch (Exception ex)
@@ -277,7 +277,7 @@ internal static class UndoRedoManager
                 MainFile.Logger.Info(
                     $"Snapshot restore took {timer.ElapsedMilliseconds} ms: {snapshot.Reason}");
             }
-            UndoStackOverlay.Refresh();
+            ActionHistoryOverlay.Refresh();
             return true;
         }
         catch (Exception ex)
@@ -361,7 +361,7 @@ internal static class UndoRedoManager
             return;
         }
 
-        foreach (UndoStackEntry pending in PendingEntries)
+        foreach (ActionHistoryEntry pending in PendingEntries)
         {
             pending.SnapshotIndex = snapshotIndex;
             ActionEntries.Add(pending);
@@ -371,7 +371,7 @@ internal static class UndoRedoManager
         AddPendingTurnTransitionEntry(snapshotIndex);
 
         TrimActionEntriesToSnapshots();
-        UndoStackOverlay.Refresh();
+        ActionHistoryOverlay.Refresh();
     }
 
     private static void CapturePendingTurnStartBeforeAction(string reason)
@@ -393,7 +393,7 @@ internal static class UndoRedoManager
 
         AddPendingTurnTransitionEntry(snapshotIndex);
         TrimActionEntriesToSnapshots();
-        UndoStackOverlay.Refresh();
+        ActionHistoryOverlay.Refresh();
         MainFile.Logger.Info($"Finalized next-turn snapshot before {reason}.");
     }
 
@@ -406,12 +406,12 @@ internal static class UndoRedoManager
 
         int turnNumber = _pendingTurnTransitionTurnNumber.Value;
         if (!ActionEntries.Any(entry =>
-                entry.Kind == UndoStackEntryKind.TurnTransition &&
+                entry.Kind == ActionHistoryEntryKind.TurnTransition &&
                 entry.TurnNumber == turnNumber &&
                 entry.SnapshotIndex == snapshotIndex))
         {
-            UndoStackEntry entry = new(
-                UndoStackEntryKind.TurnTransition,
+            ActionHistoryEntry entry = new(
+                ActionHistoryEntryKind.TurnTransition,
                 UndoText.NextTurnStart,
                 UndoText.Turn(turnNumber),
                 turnNumber)
@@ -529,7 +529,7 @@ internal static class UndoRedoManager
         PendingEntries.Clear();
         _sessionState = state;
         MainFile.Logger.Info("Started undo/redo session for current combat.");
-        UndoStackOverlay.Refresh();
+        ActionHistoryOverlay.Refresh();
     }
 
     private static void ClearHistory()
@@ -541,11 +541,11 @@ internal static class UndoRedoManager
 
     private static void TrimSnapshotsToLimit()
     {
-        int maxSnapshots = UndoAndRedoConfig.SnapshotLimit;
+        int maxSnapshots = UndoAndRestartConfig.SnapshotLimit;
         while (Snapshots.Count > maxSnapshots)
         {
             Snapshots.RemoveAt(0);
-            foreach (UndoStackEntry entry in ActionEntries)
+            foreach (ActionHistoryEntry entry in ActionEntries)
             {
                 entry.SnapshotIndex--;
             }
@@ -637,9 +637,9 @@ internal static class UndoRedoManager
 
 }
 
-internal sealed class UndoStackEntry
+internal sealed class ActionHistoryEntry
 {
-    public UndoStackEntry(UndoStackEntryKind kind, string title, string detail, int turnNumber, CardModel? card = null, PotionModel? potion = null)
+    public ActionHistoryEntry(ActionHistoryEntryKind kind, string title, string detail, int turnNumber, CardModel? card = null, PotionModel? potion = null)
     {
         Kind = kind;
         Title = title;
@@ -649,7 +649,7 @@ internal sealed class UndoStackEntry
         Potion = potion;
     }
 
-    public UndoStackEntryKind Kind { get; }
+    public ActionHistoryEntryKind Kind { get; }
     public string Title { get; }
     public string Detail { get; }
     public int TurnNumber { get; }
@@ -658,7 +658,7 @@ internal sealed class UndoStackEntry
     public int SnapshotIndex { get; set; } = -1;
 }
 
-internal enum UndoStackEntryKind
+internal enum ActionHistoryEntryKind
 {
     Card,
     Potion,

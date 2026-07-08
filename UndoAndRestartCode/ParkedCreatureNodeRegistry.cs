@@ -3,9 +3,9 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
-internal static class CreatureLifecycle
+internal static class ParkedCreatureNodeRegistry
 {
     private static readonly Dictionary<Creature, NCreature> ParkedNodes = new();
 

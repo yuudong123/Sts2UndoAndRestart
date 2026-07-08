@@ -3,7 +3,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Runs.History;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal sealed class RunHistorySnapshot
 {
@@ -18,10 +18,10 @@ internal sealed class RunHistorySnapshot
         _runState = runState;
         _actFloor = runState.ActFloor;
         _visitedMapCoords =
-            (List<MapCoord>)SnapshotGraph.CloneValue(runState.VisitedMapCoords.ToList())!;
+            (List<MapCoord>)ObjectGraphSnapshot.CloneValue(runState.VisitedMapCoords.ToList())!;
         _mapPointHistory = CloneHistory(runState.MapPointHistory);
         _visitedEventIds =
-            (HashSet<ModelId>)SnapshotGraph.CloneValue(runState.VisitedEventIds.ToHashSet())!;
+            (HashSet<ModelId>)ObjectGraphSnapshot.CloneValue(runState.VisitedEventIds.ToHashSet())!;
     }
 
     public static RunHistorySnapshot Capture(RunState runState)
@@ -34,13 +34,13 @@ internal sealed class RunHistorySnapshot
         _runState.ActFloor = _actFloor;
         ReplacePrivateList(
             "_visitedMapCoords",
-            (List<MapCoord>)SnapshotGraph.CloneValue(_visitedMapCoords)!);
+            (List<MapCoord>)ObjectGraphSnapshot.CloneValue(_visitedMapCoords)!);
         ReplacePrivateList(
             "_mapPointHistory",
             CloneHistory(_mapPointHistory));
         ReplacePrivateSet(
             "_visitedEventIds",
-            (HashSet<ModelId>)SnapshotGraph.CloneValue(_visitedEventIds)!);
+            (HashSet<ModelId>)ObjectGraphSnapshot.CloneValue(_visitedEventIds)!);
     }
 
     private void ReplacePrivateList<T>(string fieldName, IEnumerable<T> values)
@@ -78,7 +78,7 @@ internal sealed class RunHistorySnapshot
             {
                 int currentIndex = actCopy.Count - 1;
                 actCopy[currentIndex] =
-                    (MapPointHistoryEntry)SnapshotGraph.CloneValue(actCopy[currentIndex])!;
+                    (MapPointHistoryEntry)ObjectGraphSnapshot.CloneValue(actCopy[currentIndex])!;
             }
 
             result.Add(actCopy);

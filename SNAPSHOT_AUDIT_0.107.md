@@ -1,4 +1,4 @@
-# UndoAndRedoFork snapshot audit for STS2 0.107
+# Undo And Restart snapshot audit for STS2 0.107
 
 ## Scope
 

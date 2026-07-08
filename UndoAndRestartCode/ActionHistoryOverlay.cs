@@ -5,9 +5,9 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Runs;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
-internal static class UndoStackOverlay
+internal static class ActionHistoryOverlay
 {
     private const float PanelWidth = 500f;
     private const float PanelHeight = 620f;
@@ -52,13 +52,13 @@ internal static class UndoStackOverlay
 
         _layer = new CanvasLayer
         {
-            Name = "UndoStackOverlay",
+            Name = "ActionHistoryOverlay",
             Layer = 80,
         };
 
         _tabButton = new Button
         {
-            Name = "UndoAndRedoForkStackTab",
+            Name = "UndoAndRestartActionHistoryTab",
             Text = UndoText.ActionHistory,
             CustomMinimumSize = new Vector2(104f, 34f),
             FocusMode = Control.FocusModeEnum.None,
@@ -70,7 +70,7 @@ internal static class UndoStackOverlay
 
         _panel = new PanelContainer
         {
-            Name = "UndoAndRedoForkStackPanel",
+            Name = "UndoAndRestartActionHistoryPanel",
             CustomMinimumSize = new Vector2(PanelWidth, PanelHeight),
             Visible = _isOpen,
         };
@@ -90,7 +90,7 @@ internal static class UndoStackOverlay
 
         MarginContainer margin = new()
         {
-            Name = "UndoAndRedoForkStackMargin",
+            Name = "UndoAndRestartActionHistoryMargin",
         };
         margin.AddThemeConstantOverride("margin_left", 12);
         margin.AddThemeConstantOverride("margin_top", 10);
@@ -99,7 +99,7 @@ internal static class UndoStackOverlay
 
         _scroll = new ScrollContainer
         {
-            Name = "UndoAndRedoForkStackScroll",
+            Name = "UndoAndRestartActionHistoryScroll",
             CustomMinimumSize = new Vector2(PanelWidth - 24f, PanelHeight - 20f),
             HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
             VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
@@ -107,7 +107,7 @@ internal static class UndoStackOverlay
 
         _content = new VBoxContainer
         {
-            Name = "UndoAndRedoForkStackContent",
+            Name = "UndoAndRestartActionHistoryContent",
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ExpandFill,
         };
@@ -169,7 +169,7 @@ internal static class UndoStackOverlay
             child.QueueFree();
         }
 
-        IReadOnlyList<UndoStackEntry> entries = UndoRedoManager.GetActionEntries();
+        IReadOnlyList<ActionHistoryEntry> entries = UndoRedoManager.GetActionEntries();
         int cursor = UndoRedoManager.CurrentSnapshotIndex;
         _content.AddChild(CreateHeader(entries, cursor));
         _content.AddChild(CreateInitialStateRow(cursor));
@@ -181,7 +181,7 @@ internal static class UndoStackOverlay
 
         int? previousTurn = null;
         GridContainer? currentGrid = null;
-        foreach (UndoStackEntry entry in entries)
+        foreach (ActionHistoryEntry entry in entries)
         {
             if (previousTurn != entry.TurnNumber || currentGrid == null)
             {
@@ -233,7 +233,7 @@ internal static class UndoStackOverlay
             return CombatManager.Instance.IsInProgress &&
                    CombatManager.Instance.DebugOnlyGetState() != null &&
                    RunManager.Instance.IsSingleplayerOrFakeMultiplayer &&
-                   UndoAndRedoConfig.ShowActionHistoryOverlay;
+                   UndoAndRestartConfig.ShowActionHistoryOverlay;
         }
         catch
         {
@@ -278,7 +278,7 @@ internal static class UndoStackOverlay
         };
     }
 
-    private static Control CreateHeader(IReadOnlyList<UndoStackEntry> entries, int cursor)
+    private static Control CreateHeader(IReadOnlyList<ActionHistoryEntry> entries, int cursor)
     {
         int currentAction = entries.Count(entry => entry.SnapshotIndex <= cursor);
         int totalActions = entries.Count;
@@ -423,7 +423,7 @@ internal static class UndoStackOverlay
         return grid;
     }
 
-    private static Control CreateEntryTile(UndoStackEntry entry, int cursor)
+    private static Control CreateEntryTile(ActionHistoryEntry entry, int cursor)
     {
         bool applied = entry.SnapshotIndex <= cursor;
         bool current = entry.SnapshotIndex == cursor;
@@ -525,7 +525,7 @@ internal static class UndoStackOverlay
             return;
         }
 
-        QuickRestartService.HandleQuickRestartKey();
+        FloorRestartService.HandleQuickRestartKey();
         NGame.Instance?.GetViewport()?.SetInputAsHandled();
     }
 
@@ -551,7 +551,7 @@ internal static class UndoStackOverlay
         row.ZIndex = isHovered ? 20 : 0;
     }
 
-    private static Control CreateImage(UndoStackEntry entry)
+    private static Control CreateImage(ActionHistoryEntry entry)
     {
         Texture2D? texture = GetTexture(entry);
         if (texture == null)
@@ -579,11 +579,11 @@ internal static class UndoStackOverlay
         return image;
     }
 
-    private static Texture2D? GetTexture(UndoStackEntry entry)
+    private static Texture2D? GetTexture(ActionHistoryEntry entry)
     {
         try
         {
-            if (entry.Kind == UndoStackEntryKind.Card)
+            if (entry.Kind == ActionHistoryEntryKind.Card)
             {
                 return entry.Card?.Portrait;
             }
@@ -619,26 +619,26 @@ internal static class UndoStackOverlay
         }
     }
 
-    private static string GetKindText(UndoStackEntryKind kind)
+    private static string GetKindText(ActionHistoryEntryKind kind)
     {
         return kind switch
         {
-            UndoStackEntryKind.Card => UndoText.Kind(kind),
-            UndoStackEntryKind.Potion => UndoText.Kind(kind),
-            UndoStackEntryKind.DiscardPotion => UndoText.Kind(kind),
-            UndoStackEntryKind.TurnTransition => UndoText.Kind(kind),
+            ActionHistoryEntryKind.Card => UndoText.Kind(kind),
+            ActionHistoryEntryKind.Potion => UndoText.Kind(kind),
+            ActionHistoryEntryKind.DiscardPotion => UndoText.Kind(kind),
+            ActionHistoryEntryKind.TurnTransition => UndoText.Kind(kind),
             _ => UndoText.Kind(kind),
         };
     }
 
-    private static Color GetKindColor(UndoStackEntryKind kind)
+    private static Color GetKindColor(ActionHistoryEntryKind kind)
     {
         return kind switch
         {
-            UndoStackEntryKind.Card => new Color(0.45f, 0.72f, 1f),
-            UndoStackEntryKind.Potion => new Color(0.45f, 1f, 0.68f),
-            UndoStackEntryKind.DiscardPotion => new Color(1f, 0.58f, 0.35f),
-            UndoStackEntryKind.TurnTransition => new Color(1f, 0.84f, 0.42f),
+            ActionHistoryEntryKind.Card => new Color(0.45f, 0.72f, 1f),
+            ActionHistoryEntryKind.Potion => new Color(0.45f, 1f, 0.68f),
+            ActionHistoryEntryKind.DiscardPotion => new Color(1f, 0.58f, 0.35f),
+            ActionHistoryEntryKind.TurnTransition => new Color(1f, 0.84f, 0.42f),
             _ => Colors.White,
         };
     }

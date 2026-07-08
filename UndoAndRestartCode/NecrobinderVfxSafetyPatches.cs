@@ -3,10 +3,10 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 [HarmonyPatch(typeof(NNecrobinderVfx))]
-internal static class NecrobinderVfxPatches
+internal static class NecrobinderVfxSafetyPatches
 {
     [HarmonyPatch("UpdateFlameVisibility")]
     [HarmonyPrefix]

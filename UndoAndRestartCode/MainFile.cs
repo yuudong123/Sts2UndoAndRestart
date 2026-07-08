@@ -4,7 +4,7 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 [ModInitializer(nameof(Initialize))]
 public static class MainFile
@@ -25,7 +25,7 @@ public static class MainFile
 
         _harmony = new Harmony(ModId);
         _harmony.PatchAll(Assembly.GetExecutingAssembly());
-        UndoAndRedoConfig.Load();
+        UndoAndRestartConfig.Load();
         SubscribeCombatEvents();
         Logger.Info("Undo snapshot engine initialized.");
     }

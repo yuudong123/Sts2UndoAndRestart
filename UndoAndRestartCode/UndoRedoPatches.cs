@@ -12,13 +12,13 @@ using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using MegaCrit.Sts2.addons.mega_text;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 [HarmonyPatch]
 internal static class UndoRedoPatches
 {
-    private static readonly Dictionary<UsePotionAction, UndoStackEntry?> PotionEntries = new();
-    private static readonly Dictionary<DiscardPotionGameAction, UndoStackEntry?> DiscardPotionEntries = new();
+    private static readonly Dictionary<UsePotionAction, ActionHistoryEntry?> PotionEntries = new();
+    private static readonly Dictionary<DiscardPotionGameAction, ActionHistoryEntry?> DiscardPotionEntries = new();
 
     [HarmonyPatch(typeof(NGame), nameof(NGame._Input))]
     [HarmonyPrefix]
@@ -62,7 +62,7 @@ internal static class UndoRedoPatches
         else if ((keyCode == UndoRedoManager.QuickRestartKeyCode || physicalKeyCode == UndoRedoManager.QuickRestartKeyCode) &&
                  UndoInputBindings.ShouldHandleDefaultKeyFallback(UndoInputBindings.RestartAction))
         {
-            QuickRestartService.HandleQuickRestartKey();
+            FloorRestartService.HandleQuickRestartKey();
             NGame.Instance?.GetViewport()?.SetInputAsHandled();
         }
     }
@@ -85,7 +85,7 @@ internal static class UndoRedoPatches
         }
         else if (UndoInputBindings.IsRestartAction(action))
         {
-            QuickRestartService.HandleQuickRestartKey();
+            FloorRestartService.HandleQuickRestartKey();
             NGame.Instance?.GetViewport()?.SetInputAsHandled();
         }
     }
@@ -214,7 +214,7 @@ internal static class UndoRedoPatches
     {
         if (__instance.WasEnqueuedInCombat)
         {
-            PotionEntries.TryGetValue(__instance, out UndoStackEntry? entry);
+            PotionEntries.TryGetValue(__instance, out ActionHistoryEntry? entry);
             PotionEntries.Remove(__instance);
             __result = UndoRedoManager.CaptureAfterActionAsync(__result, "UsePotionAction", entry);
         }
@@ -237,7 +237,7 @@ internal static class UndoRedoPatches
     {
         if (__instance.WasEnqueuedInCombat)
         {
-            DiscardPotionEntries.TryGetValue(__instance, out UndoStackEntry? entry);
+            DiscardPotionEntries.TryGetValue(__instance, out ActionHistoryEntry? entry);
             DiscardPotionEntries.Remove(__instance);
             __result = UndoRedoManager.CaptureAfterActionAsync(__result, "DiscardPotionGameAction", entry);
         }
@@ -259,7 +259,7 @@ internal static class UndoRedoPatches
         // 여기서 캡처하면 다음 플레이어 조작 가능 스냅샷 전에 redo가 걸리는 비플레이 중간 지점이 생김.
     }
 
-    private static UndoStackEntry? CreateCardEntry(PlayCardAction action)
+    private static ActionHistoryEntry? CreateCardEntry(PlayCardAction action)
     {
         try
         {
@@ -270,7 +270,7 @@ internal static class UndoRedoPatches
             }
 
             string target = action.Target?.LogName ?? UndoText.NoTarget;
-            return new UndoStackEntry(UndoStackEntryKind.Card, card.Title, target, GetRoundNumber(), card: card);
+            return new ActionHistoryEntry(ActionHistoryEntryKind.Card, card.Title, target, GetRoundNumber(), card: card);
         }
         catch (Exception ex)
         {
@@ -279,7 +279,7 @@ internal static class UndoRedoPatches
         }
     }
 
-    private static UndoStackEntry? CreatePotionEntry(UsePotionAction action)
+    private static ActionHistoryEntry? CreatePotionEntry(UsePotionAction action)
     {
         try
         {
@@ -290,7 +290,7 @@ internal static class UndoRedoPatches
             }
 
             string target = GetTargetName(action.TargetId);
-            return new UndoStackEntry(UndoStackEntryKind.Potion, potion.Title.GetFormattedText() ?? potion.Id.Entry, target, GetRoundNumber(), potion: potion);
+            return new ActionHistoryEntry(ActionHistoryEntryKind.Potion, potion.Title.GetFormattedText() ?? potion.Id.Entry, target, GetRoundNumber(), potion: potion);
         }
         catch (Exception ex)
         {
@@ -299,7 +299,7 @@ internal static class UndoRedoPatches
         }
     }
 
-    private static UndoStackEntry? CreateDiscardPotionEntry(DiscardPotionGameAction action)
+    private static ActionHistoryEntry? CreateDiscardPotionEntry(DiscardPotionGameAction action)
     {
         try
         {
@@ -311,7 +311,7 @@ internal static class UndoRedoPatches
                 return null;
             }
 
-            return new UndoStackEntry(UndoStackEntryKind.DiscardPotion, potion.Title.GetFormattedText() ?? potion.Id.Entry, UndoText.DiscardSlot(slotIndex), GetRoundNumber(), potion: potion);
+            return new ActionHistoryEntry(ActionHistoryEntryKind.DiscardPotion, potion.Title.GetFormattedText() ?? potion.Id.Entry, UndoText.DiscardSlot(slotIndex), GetRoundNumber(), potion: potion);
         }
         catch (Exception ex)
         {

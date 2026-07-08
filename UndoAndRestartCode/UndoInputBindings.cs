@@ -3,7 +3,7 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal static class UndoInputBindings
 {

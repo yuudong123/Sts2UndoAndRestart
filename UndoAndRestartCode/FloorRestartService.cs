@@ -20,9 +20,9 @@ using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.MapDrawing;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
-internal static class QuickRestartService
+internal static class FloorRestartService
 {
     private const string FadeTransitionPath = "res://materials/transitions/fade_transition_mat.tres";
     private static bool _isRestarting;

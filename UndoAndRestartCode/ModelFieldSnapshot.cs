@@ -1,14 +1,14 @@
 using MegaCrit.Sts2.Core.Models;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal sealed class ModelFieldSnapshot
 {
-    private readonly SnapshotGraph _graph;
+    private readonly ObjectGraphSnapshot _graph;
 
     private ModelFieldSnapshot(AbstractModel model)
     {
-        _graph = SnapshotGraph.Capture(model);
+        _graph = ObjectGraphSnapshot.Capture(model);
     }
 
     public static ModelFieldSnapshot Capture(AbstractModel model)

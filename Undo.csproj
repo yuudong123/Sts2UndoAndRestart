@@ -4,7 +4,7 @@
     <ImplicitUsings>true</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>UndoAndRestart</AssemblyName>
-    <RootNamespace>UndoAndRedoForkCode</RootNamespace>
+    <RootNamespace>UndoAndRestartCode</RootNamespace>
     <Sts2InstallDir Condition="'$(Sts2InstallDir)' == '' and '$(STS2_INSTALL_DIR)' != ''">$(STS2_INSTALL_DIR)</Sts2InstallDir>
     <Sts2InstallDir Condition="'$(Sts2InstallDir)' == ''">D:\Games\Steam\steamapps\common\Slay the Spire 2</Sts2InstallDir>
     <Sts2RuntimeDir>$(Sts2InstallDir)\data_sts2_windows_x86_64</Sts2RuntimeDir>

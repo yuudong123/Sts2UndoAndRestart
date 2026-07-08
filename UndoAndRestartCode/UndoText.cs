@@ -1,6 +1,6 @@
 using MegaCrit.Sts2.Core.Localization;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal static class UndoText
 {
@@ -82,14 +82,14 @@ internal static class UndoText
 
     public static string Redo => Pick("재실행", "Redo");
 
-    public static string Kind(UndoStackEntryKind kind)
+    public static string Kind(ActionHistoryEntryKind kind)
     {
         return kind switch
         {
-            UndoStackEntryKind.Card => Pick("카드", "Card"),
-            UndoStackEntryKind.Potion => Pick("물약", "Potion"),
-            UndoStackEntryKind.DiscardPotion => Pick("버림", "Discard"),
-            UndoStackEntryKind.TurnTransition => Pick("턴", "Turn"),
+            ActionHistoryEntryKind.Card => Pick("카드", "Card"),
+            ActionHistoryEntryKind.Potion => Pick("물약", "Potion"),
+            ActionHistoryEntryKind.DiscardPotion => Pick("버림", "Discard"),
+            ActionHistoryEntryKind.TurnTransition => Pick("턴", "Turn"),
             _ => Pick("행동", "Action"),
         };
     }

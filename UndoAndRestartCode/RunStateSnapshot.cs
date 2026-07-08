@@ -5,16 +5,16 @@ using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal sealed class RunStateSnapshot
 {
     private readonly RunState _runState;
     private readonly List<CardModel> _allCards;
-    private readonly SnapshotGraph _extraFields;
-    private readonly SnapshotGraph _rng;
-    private readonly SnapshotGraph _odds;
-    private readonly SnapshotGraph _sharedRelicGrabBag;
+    private readonly ObjectGraphSnapshot _extraFields;
+    private readonly ObjectGraphSnapshot _rng;
+    private readonly ObjectGraphSnapshot _odds;
+    private readonly ObjectGraphSnapshot _sharedRelicGrabBag;
     private readonly int _nextRoomId;
     private readonly CombatRoomSnapshot? _combatRoom;
 
@@ -23,10 +23,10 @@ internal sealed class RunStateSnapshot
         _runState = runState;
         _allCards = ReflectionUtil.GetField<List<CardModel>>(runState, "_allCards")?.ToList()
             ?? new List<CardModel>();
-        _extraFields = SnapshotGraph.Capture(runState.ExtraFields);
-        _rng = SnapshotGraph.Capture(runState.Rng);
-        _odds = SnapshotGraph.Capture(runState.Odds);
-        _sharedRelicGrabBag = SnapshotGraph.Capture(runState.SharedRelicGrabBag);
+        _extraFields = ObjectGraphSnapshot.Capture(runState.ExtraFields);
+        _rng = ObjectGraphSnapshot.Capture(runState.Rng);
+        _odds = ObjectGraphSnapshot.Capture(runState.Odds);
+        _sharedRelicGrabBag = ObjectGraphSnapshot.Capture(runState.SharedRelicGrabBag);
         _nextRoomId = runState.NextRoomId;
         _combatRoom = runState.CurrentRoom is CombatRoom room
             ? CombatRoomSnapshot.Capture(room)
@@ -65,7 +65,7 @@ internal sealed class RunStateSnapshot
             _isPreFinished = room.IsPreFinished;
             _goldProportion = room.GoldProportion;
             _extraRewards =
-                (Dictionary<Player, List<Reward>>)SnapshotGraph.CloneValue(
+                (Dictionary<Player, List<Reward>>)ObjectGraphSnapshot.CloneValue(
                     ReflectionUtil.GetField<Dictionary<Player, List<Reward>>>(room, "_extraRewards")
                         ?? new Dictionary<Player, List<Reward>>())!;
         }
@@ -91,7 +91,7 @@ internal sealed class RunStateSnapshot
             foreach ((Player player, List<Reward> rewards) in _extraRewards)
             {
                 destination[player] =
-                    (List<Reward>)SnapshotGraph.CloneValue(rewards)!;
+                    (List<Reward>)ObjectGraphSnapshot.CloneValue(rewards)!;
             }
         }
     }

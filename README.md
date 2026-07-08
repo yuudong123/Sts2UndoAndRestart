@@ -60,13 +60,13 @@ bin\Release\net9.0\UndoAndRestart.dll
 ```text
 Undo.csproj
 UndoAndRestart.json
-UndoAndRedoForkCode/
+UndoAndRestartCode/
 docs/
 ```
 
 - `Undo.csproj`: C# 프로젝트와 STS2 런타임 DLL 참조를 정의합니다.
 - `UndoAndRestart.json`: STS2 모드 매니페스트입니다.
-- `UndoAndRedoForkCode/`: 실제 모드 소스입니다. 기존 네임스페이스 이름은 호환성 때문에 유지합니다.
+- `UndoAndRestartCode/`: 실제 모드 소스입니다.
 - `docs/ARCHITECTURE.md`: 스냅샷 엔진과 주요 흐름 설명입니다.
 - `docs/CS_FILE_SPEC.md`: `.cs` 파일별 책임 명세입니다.
 

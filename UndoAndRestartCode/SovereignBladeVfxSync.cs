@@ -7,7 +7,7 @@ using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal static class SovereignBladeVfxSync
 {

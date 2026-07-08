@@ -13,9 +13,9 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
-internal sealed class SnapshotGraph
+internal sealed class ObjectGraphSnapshot
 {
     private const BindingFlags Fields = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly MethodInfo MemberwiseCloneMethod =
@@ -25,7 +25,7 @@ internal sealed class SnapshotGraph
     private readonly object _root;
     private readonly Dictionary<FieldInfo, object?> _values = new();
 
-    private SnapshotGraph(object root)
+    private ObjectGraphSnapshot(object root)
     {
         _root = root;
         Dictionary<object, object> visited = new(ReferenceEqualityComparer.Instance);
@@ -40,9 +40,9 @@ internal sealed class SnapshotGraph
         }
     }
 
-    public static SnapshotGraph Capture(object root)
+    public static ObjectGraphSnapshot Capture(object root)
     {
-        return new SnapshotGraph(root);
+        return new ObjectGraphSnapshot(root);
     }
 
     public void Restore(object root)

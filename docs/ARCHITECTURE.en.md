@@ -25,10 +25,10 @@ UndoRedoManager
 CombatSnapshot
   -> Captures and restores combat, run, card, player, creature, and UI state
 
-UndoStackOverlay
+ActionHistoryOverlay
   -> Renders the action history UI
 
-QuickRestartService
+FloorRestartService
   -> Handles F5 floor restart
 ```
 
@@ -57,7 +57,7 @@ The restore process intentionally reuses live objects instead of using the game'
 
 ## F5 Floor Restart Flow
 
-`QuickRestartService` reloads the current room from the current singleplayer run save.
+`FloorRestartService` reloads the current room from the current singleplayer run save.
 
 - It does not run in multiplayer.
 - It does not run while a game action is pending.
@@ -84,7 +84,7 @@ If the player binds a key through the game's input settings, that binding takes 
 The manifest uses `affects_gameplay=false` so players can still enter multiplayer lobbies with the mod installed. The gameplay-changing features are blocked in code instead.
 
 - `UndoRedoManager.CanCapture` blocks snapshot capture in normal multiplayer runs.
-- `QuickRestartService` blocks F5 restart unless `NetGameType.Singleplayer` is active.
+- `FloorRestartService` blocks F5 restart unless `NetGameType.Singleplayer` is active.
 - The action history overlay is shown only in singleplayer or fake-multiplayer-compatible contexts.
 
 ## Main Risk Areas

@@ -25,7 +25,7 @@ using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal sealed class CombatSnapshot
 {
@@ -253,7 +253,7 @@ internal sealed class CombatSnapshot
                 }
 
                 if (NCombatRoom.Instance?.GetCreatureNode(creature) == null &&
-                    !CreatureLifecycle.Unpark(creature))
+                    !ParkedCreatureNodeRegistry.Unpark(creature))
                 {
                     try
                     {
@@ -411,7 +411,7 @@ internal sealed class CombatSnapshot
         {
             if (!wanted.Contains(node.Entity))
             {
-                CreatureLifecycle.Park(node.Entity);
+                ParkedCreatureNodeRegistry.Park(node.Entity);
             }
         }
 
@@ -419,7 +419,7 @@ internal sealed class CombatSnapshot
         {
             if (room.GetCreatureNode(creature) == null)
             {
-                if (CreatureLifecycle.Unpark(creature))
+                if (ParkedCreatureNodeRegistry.Unpark(creature))
                 {
                     continue;
                 }
@@ -1184,7 +1184,7 @@ internal sealed class CombatSnapshot
         NCreature? node = NCombatRoom.Instance?.GetCreatureNode(creature);
         if (node != null)
         {
-            CreatureLifecycle.Park(creature);
+            ParkedCreatureNodeRegistry.Park(creature);
         }
     }
 
@@ -1369,9 +1369,9 @@ internal sealed class CombatSnapshot
         private readonly int _maxEnergy;
         private readonly int _baseOrbSlotCount;
         private readonly bool _canUseOrRemovePotions;
-        private readonly SnapshotGraph _extraFields;
-        private readonly SnapshotGraph _playerOdds;
-        private readonly SnapshotGraph _relicGrabBag;
+        private readonly ObjectGraphSnapshot _extraFields;
+        private readonly ObjectGraphSnapshot _playerOdds;
+        private readonly ObjectGraphSnapshot _relicGrabBag;
         private readonly List<ModelId> _discoveredCards;
         private readonly List<ModelId> _discoveredRelics;
         private readonly List<ModelId> _discoveredPotions;
@@ -1404,9 +1404,9 @@ internal sealed class CombatSnapshot
             _maxEnergy = player.MaxEnergy;
             _baseOrbSlotCount = player.BaseOrbSlotCount;
             _canUseOrRemovePotions = GetCanUseOrRemovePotions(player);
-            _extraFields = SnapshotGraph.Capture(player.ExtraFields);
-            _playerOdds = SnapshotGraph.Capture(player.PlayerOdds);
-            _relicGrabBag = SnapshotGraph.Capture(player.RelicGrabBag);
+            _extraFields = ObjectGraphSnapshot.Capture(player.ExtraFields);
+            _playerOdds = ObjectGraphSnapshot.Capture(player.PlayerOdds);
+            _relicGrabBag = ObjectGraphSnapshot.Capture(player.RelicGrabBag);
             _discoveredCards = player.DiscoveredCards.ToList();
             _discoveredRelics = player.DiscoveredRelics.ToList();
             _discoveredPotions = player.DiscoveredPotions.ToList();

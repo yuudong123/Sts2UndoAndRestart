@@ -6,7 +6,7 @@ using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Runs;
 
-namespace UndoAndRedoForkCode;
+namespace UndoAndRestartCode;
 
 internal static class CombatRuntimeStateCleanup
 {
