@@ -1,0 +1,11 @@
+{
+  "id": "UndoAndRestart",
+  "name": "Undo And Restart",
+  "author": "yuudong2",
+  "description": "Adds undo, redo, and floor restart controls, plus an action history tab for used cards and potions.",
+  "version": "1.0.8",
+  "has_pck": false,
+  "has_dll": true,
+  "dependencies": [],
+  "affects_gameplay": false
+}

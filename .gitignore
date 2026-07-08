@@ -1,0 +1,16 @@
+bin/
+obj/
+.vs/
+.vscode/
+
+*.user
+*.suo
+*.cache
+*.log
+*.tmp
+*.tmp_*
+
+publish/
+artifacts/
+*.zip
+*.nupkg
