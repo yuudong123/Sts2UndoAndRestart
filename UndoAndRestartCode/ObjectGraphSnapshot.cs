@@ -21,6 +21,7 @@ internal sealed class ObjectGraphSnapshot
     private static readonly MethodInfo MemberwiseCloneMethod =
         typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic)!;
     private static readonly Dictionary<Type, FieldInfo[]> FieldCache = new();
+    private static int _hasLoggedRngObjectGraphFallback;
 
     private readonly object _root;
     private readonly Dictionary<FieldInfo, object?> _values = new();
@@ -102,7 +103,7 @@ internal sealed class ObjectGraphSnapshot
 
         if (value is Rng rng)
         {
-            return CloneRng(rng);
+            return CloneRng(rng, owner, visited);
         }
 
         if (value is CardEnergyCost energyCost && owner is CardModel card)
@@ -157,6 +158,15 @@ internal sealed class ObjectGraphSnapshot
             return copy;
         }
 
+        return CloneObjectByFields(value, owner, visited);
+    }
+
+    private static object CloneObjectByFields(
+        object value,
+        object? owner,
+        Dictionary<object, object> visited)
+    {
+        Type type = value.GetType();
         object clone = MemberwiseCloneMethod.Invoke(value, null)!;
         visited[value] = clone;
         foreach (FieldInfo field in EnumerateFields(type))
@@ -182,12 +192,15 @@ internal sealed class ObjectGraphSnapshot
         return clone;
     }
 
-    private static Rng CloneRng(Rng rng)
+    private static Rng CloneRng(
+        Rng rng,
+        object? owner,
+        Dictionary<object, object> visited)
     {
-        Type rngType = typeof(Rng);
+        Type rngType = rng.GetType();
         MethodInfo? toSerializable = rngType.GetMethod(
             "ToSerializable",
-            BindingFlags.Instance | BindingFlags.Public,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
             null,
             Type.EmptyTypes,
             null);
@@ -202,7 +215,9 @@ internal sealed class ObjectGraphSnapshot
                 null);
             if (serializableConstructor != null)
             {
-                return (Rng)serializableConstructor.Invoke(new[] { serializable });
+                Rng clone = (Rng)serializableConstructor.Invoke(new[] { serializable });
+                visited[rng] = clone;
+                return clone;
             }
         }
 
@@ -225,11 +240,20 @@ internal sealed class ObjectGraphSnapshot
                 null);
             if (legacyConstructor != null)
             {
-                return (Rng)legacyConstructor.Invoke(new[] { seed, counter });
+                Rng clone = (Rng)legacyConstructor.Invoke(new[] { seed, counter });
+                visited[rng] = clone;
+                return clone;
             }
         }
 
-        throw new MissingMethodException("No supported Rng snapshot API was found.");
+        if (Interlocked.Exchange(ref _hasLoggedRngObjectGraphFallback, 1) == 0)
+        {
+            MainFile.Logger.Warn(
+                $"No constructor-based RNG snapshot API was found for {rngType.FullName}; " +
+                "using object-graph cloning fallback.");
+        }
+
+        return (Rng)CloneObjectByFields(rng, owner, visited);
     }
 
     private static bool TryRestoreContainer(

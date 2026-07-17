@@ -37,6 +37,8 @@ counter and four `ulong` state values exposed through `SerializableRng`.
 - 0.109 and later: `ToSerializable()` plus the serializable constructor.
 - Legacy versions: `Seed`, `Counter`, and the constructor matching the runtime
   seed type (`uint` in 0.107).
+- Unknown API shapes: the proven legacy object-graph clone remains as a final
+  fallback so an RNG API mismatch cannot disable all snapshot capture.
 
 This preserves exact future random results instead of merely restoring the
 number of calls. A focused test consumed one value, cloned the RNG, and verified
