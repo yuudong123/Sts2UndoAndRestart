@@ -212,18 +212,21 @@ internal sealed class ObjectGraphSnapshot
         PropertyInfo? counterProperty = rngType.GetProperty(
             "Counter",
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        ConstructorInfo? legacyConstructor = rngType.GetConstructor(
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-            null,
-            new[] { typeof(ulong), typeof(int) },
-            null);
-        if (seedProperty != null && counterProperty != null && legacyConstructor != null)
+        if (seedProperty != null && counterProperty != null)
         {
-            ulong seed = (ulong)(seedProperty.GetValue(rng)
-                ?? throw new InvalidOperationException("Rng.Seed returned null."));
-            int counter = (int)(counterProperty.GetValue(rng)
-                ?? throw new InvalidOperationException("Rng.Counter returned null."));
-            return (Rng)legacyConstructor.Invoke(new object[] { seed, counter });
+            object seed = seedProperty.GetValue(rng)
+                ?? throw new InvalidOperationException("Rng.Seed returned null.");
+            object counter = counterProperty.GetValue(rng)
+                ?? throw new InvalidOperationException("Rng.Counter returned null.");
+            ConstructorInfo? legacyConstructor = rngType.GetConstructor(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { seed.GetType(), counter.GetType() },
+                null);
+            if (legacyConstructor != null)
+            {
+                return (Rng)legacyConstructor.Invoke(new[] { seed, counter });
+            }
         }
 
         throw new MissingMethodException("No supported Rng snapshot API was found.");

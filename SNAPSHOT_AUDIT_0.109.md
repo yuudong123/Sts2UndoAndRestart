@@ -35,7 +35,8 @@ counter and four `ulong` state values exposed through `SerializableRng`.
 `ObjectGraphSnapshot.CloneRng` now selects the available API at runtime:
 
 - 0.109 and later: `ToSerializable()` plus the serializable constructor.
-- Legacy versions: `Seed`, `Counter`, and the `(ulong, int)` constructor.
+- Legacy versions: `Seed`, `Counter`, and the constructor matching the runtime
+  seed type (`uint` in 0.107).
 
 This preserves exact future random results instead of merely restoring the
 number of calls. A focused test consumed one value, cloned the RNG, and verified
@@ -149,4 +150,3 @@ The following scenarios are the highest-value in-game checks for 0.109:
 No uncovered 0.109 gameplay field requires a new per-card or per-relic special
 case. The compatibility-sensitive changes are centralized in RNG cloning,
 runtime guard normalization, potion lock probing, and transient VFX cleanup.
-
