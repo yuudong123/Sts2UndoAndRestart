@@ -102,7 +102,7 @@ internal sealed class ObjectGraphSnapshot
 
         if (value is Rng rng)
         {
-            return new Rng(rng.Seed, rng.Counter);
+            return CloneRng(rng);
         }
 
         if (value is CardEnergyCost energyCost && owner is CardModel card)
@@ -180,6 +180,53 @@ internal sealed class ObjectGraphSnapshot
         }
 
         return clone;
+    }
+
+    private static Rng CloneRng(Rng rng)
+    {
+        Type rngType = typeof(Rng);
+        MethodInfo? toSerializable = rngType.GetMethod(
+            "ToSerializable",
+            BindingFlags.Instance | BindingFlags.Public,
+            null,
+            Type.EmptyTypes,
+            null);
+        if (toSerializable != null)
+        {
+            object serializable = toSerializable.Invoke(rng, null)
+                ?? throw new InvalidOperationException("Rng.ToSerializable returned null.");
+            ConstructorInfo? serializableConstructor = rngType.GetConstructor(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { serializable.GetType() },
+                null);
+            if (serializableConstructor != null)
+            {
+                return (Rng)serializableConstructor.Invoke(new[] { serializable });
+            }
+        }
+
+        PropertyInfo? seedProperty = rngType.GetProperty(
+            "Seed",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        PropertyInfo? counterProperty = rngType.GetProperty(
+            "Counter",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        ConstructorInfo? legacyConstructor = rngType.GetConstructor(
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            new[] { typeof(ulong), typeof(int) },
+            null);
+        if (seedProperty != null && counterProperty != null && legacyConstructor != null)
+        {
+            ulong seed = (ulong)(seedProperty.GetValue(rng)
+                ?? throw new InvalidOperationException("Rng.Seed returned null."));
+            int counter = (int)(counterProperty.GetValue(rng)
+                ?? throw new InvalidOperationException("Rng.Counter returned null."));
+            return (Rng)legacyConstructor.Invoke(new object[] { seed, counter });
+        }
+
+        throw new MissingMethodException("No supported Rng snapshot API was found.");
     }
 
     private static bool TryRestoreContainer(

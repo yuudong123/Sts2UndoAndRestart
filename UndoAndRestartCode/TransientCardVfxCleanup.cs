@@ -12,12 +12,14 @@ internal static class TransientCardVfxCleanup
         NCombatRoom? room = NCombatRoom.Instance;
         ClearContainer(room?.Ui?.CardPreviewContainer);
         ClearContainer(room?.Ui?.MessyCardPreviewContainer);
+        ClearCardVfx(room?.Ui);
         ClearCardVfx(room?.CombatVfxContainer);
 
         if (NRun.Instance?.GlobalUi != null)
         {
             ClearContainer(NRun.Instance.GlobalUi.CardPreviewContainer);
             ClearContainer(NRun.Instance.GlobalUi.MessyCardPreviewContainer);
+            ClearCardVfx(NRun.Instance.GlobalUi.AboveTopBarVfxContainer);
             ClearCardVfx(NRun.Instance.GlobalUi.TopBar?.TrailContainer);
         }
     }
@@ -56,10 +58,19 @@ internal static class TransientCardVfxCleanup
 
     private static bool IsTransientCardVfx(Node node)
     {
-        return node is NCardFlyVfx ||
-               node is NCardFlyShuffleVfx ||
-               node is NCardFlyPowerVfx ||
-               node is NCardTrailVfx;
+        if (node is NCardFlyVfx ||
+            node is NCardFlyShuffleVfx ||
+            node is NCardFlyPowerVfx ||
+            node is NCardTrailVfx)
+        {
+            return true;
+        }
+
+        // 0.109에서 추가된 타입을 직접 참조하면 이전 게임 버전에서 로드할 수 없음.
+        return node.GetType().FullName is
+            "MegaCrit.Sts2.Core.Nodes.Vfx.Cards.NCardExhaustVfx" or
+            "MegaCrit.Sts2.Core.Nodes.Vfx.Cards.NCardExhaustQuickVfx" or
+            "MegaCrit.Sts2.Core.Nodes.Vfx.Cards.NCardRemoveVfx";
     }
 
     private static void RemoveImmediately(Node node)

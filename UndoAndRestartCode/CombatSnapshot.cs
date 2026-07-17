@@ -349,6 +349,7 @@ internal sealed class CombatSnapshot
         CombatManager manager = CombatManager.Instance;
         ReflectionUtil.SetField(manager, "_pendingLoss", null);
         ReflectionUtil.SetField(manager, "_playerActionsDisabled", false);
+        ReflectionUtil.SetField(manager, "_playerToEnemyTransitionFired", false);
         ReflectionUtil.SetField(manager, "_inPlayerTurnSetup", false);
         ReflectionUtil.SetField(manager, "_deferredEndTurnTransition", null);
         ReflectionUtil.SetField(manager, "<IsPaused>k__BackingField", false);
@@ -364,6 +365,7 @@ internal sealed class CombatSnapshot
             _playersTakingExtraTurn);
 
         ReflectionUtil.SetField(RunManager.Instance.ActionQueueSet, "_nextId", _nextActionId);
+        ReflectionUtil.SetField(RunManager.Instance.ActionQueueSet, "_wasReset", false);
         ReflectionUtil.SetField(RunManager.Instance.ActionQueueSynchronizer, "_nextHookId", _nextHookId);
         ReplaceReadOnlyList(
             ReflectionUtil.GetField<List<uint>>(RunManager.Instance.PlayerChoiceSynchronizer, "_choiceIds"),
@@ -1449,6 +1451,7 @@ internal sealed class CombatSnapshot
 
                 field.SetValue(player, value);
                 ReflectionUtil.GetField<Action>(player, "CanUseOrRemovePotionsChanged")?.Invoke();
+                ReflectionUtil.GetField<Action>(player, "CanRemovePotionsChanged")?.Invoke();
                 return;
             }
         }

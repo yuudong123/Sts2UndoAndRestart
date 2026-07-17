@@ -19,6 +19,7 @@ internal static class CombatRuntimeStateCleanup
 
     public static void ClearCombatTurnFlags()
     {
+        ReflectionUtil.SetField(CombatManager.Instance, "_playerToEnemyTransitionFired", false);
         ReflectionUtil.SetField(CombatManager.Instance, "_inPlayerTurnSetup", false);
         ReflectionUtil.SetField(CombatManager.Instance, "_deferredEndTurnTransition", null);
         ReflectionUtil.SetField(CombatManager.Instance, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
@@ -33,6 +34,7 @@ internal static class CombatRuntimeStateCleanup
             return false;
         }
 
+        ReflectionUtil.SetField(CombatManager.Instance, "_playerToEnemyTransitionFired", false);
         ReflectionUtil.SetField(CombatManager.Instance, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
         ReflectionUtil.SetField(CombatManager.Instance, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
         MainFile.Logger.Info("Cleared stale ending-turn flags while player control was available.");
