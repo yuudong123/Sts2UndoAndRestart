@@ -336,7 +336,6 @@ internal sealed class CombatSnapshot
         RefreshOrbUi();
         ClearTransientCardPlayUi();
         RefreshHandUi();
-        RefreshPlayContainer();
         SovereignBladeVfxSync.Refresh(_players.Keys);
         RefreshCreatureUi();
         RefreshPileEvents();
@@ -853,6 +852,7 @@ internal sealed class CombatSnapshot
         {
             ClearCurrentCardPlay();
             ClearPlayQueue();
+            ClearPlayContainerCards();
             ClearLooseCombatUiCards();
             ClearCombatUiPlayContainerCache();
         }
@@ -879,6 +879,8 @@ internal sealed class CombatSnapshot
             // 되돌리기 복원 중에는 카드 플레이 노드가 이미 반쯤 정리된 상태일 수 있음.
         }
 
+        RestoreInterruptedCardPlayHolders(hand);
+
         Node? currentCardPlay = ReflectionUtil.GetField<Node>(hand, "_currentCardPlay");
         if (currentCardPlay != null && GodotObject.IsInstanceValid(currentCardPlay))
         {
@@ -887,6 +889,51 @@ internal sealed class CombatSnapshot
         }
 
         ReflectionUtil.SetField(hand, "_currentCardPlay", null);
+        ReflectionUtil.SetField(hand, "_draggedHolderIndex", -1);
+        ReflectionUtil.SetField(hand, "<FocusedHolder>k__BackingField", null);
+        ReflectionUtil.SetField(hand, "_lastFocusedHolderIdx", -1);
+    }
+
+    private static void RestoreInterruptedCardPlayHolders(NPlayerHand hand)
+    {
+        HashSet<NHandCardHolder>? awaitingHolders =
+            ReflectionUtil.GetField<HashSet<NHandCardHolder>>(hand, "_holdersAwaitingQueue");
+        if (awaitingHolders == null)
+        {
+            return;
+        }
+
+        foreach (NHandCardHolder holder in awaitingHolders.ToList())
+        {
+            if (!GodotObject.IsInstanceValid(holder) || holder.GetParent() == hand.CardHolderContainer)
+            {
+                continue;
+            }
+
+            try
+            {
+                holder.Reparent(hand.CardHolderContainer);
+                holder.SetDefaultTargets();
+            }
+            catch (Exception ex)
+            {
+                MainFile.Logger.Warn($"Failed to return interrupted card holder to hand: {ex.Message}");
+                try
+                {
+                    if (holder.GetParent() != null)
+                    {
+                        hand.RemoveCardHolder(holder);
+                    }
+                }
+                catch (Exception removeEx)
+                {
+                    MainFile.Logger.Warn(
+                        $"Failed to remove interrupted card holder after recovery failed: {removeEx.Message}");
+                }
+            }
+        }
+
+        awaitingHolders.Clear();
     }
 
     private static void ClearPlayQueue()
@@ -932,6 +979,20 @@ internal sealed class CombatSnapshot
         }
     }
 
+    private static void ClearPlayContainerCards()
+    {
+        Control? playContainer = NCombatRoom.Instance?.Ui?.PlayContainer;
+        if (playContainer == null || !GodotObject.IsInstanceValid(playContainer))
+        {
+            return;
+        }
+
+        foreach (NCard card in playContainer.GetChildren().OfType<NCard>().ToList())
+        {
+            RemoveCardNodeImmediately(card);
+        }
+    }
+
     private static void ClearCombatUiPlayContainerCache()
     {
         Node? ui = NCombatRoom.Instance?.Ui;
@@ -940,26 +1001,10 @@ internal sealed class CombatSnapshot
             return;
         }
 
+        ReflectionUtil.GetField<Tween>(ui, "_playContainerPeekModeTween")?.Kill();
+        ReflectionUtil.SetField(ui, "_playContainerPeekModeTween", null);
         ReflectionUtil.GetField<IDictionary>(ui, "_originalPlayContainerCardPositions")?.Clear();
         ReflectionUtil.GetField<IDictionary>(ui, "_originalPlayContainerCardScales")?.Clear();
-    }
-
-    private void RefreshPlayContainer()
-    {
-        Control? playContainer = NCombatRoom.Instance?.Ui?.PlayContainer;
-        if (playContainer == null)
-        {
-            return;
-        }
-
-        HashSet<CardModel> playCards = _players.Values.SelectMany(p => p.PlayPile).ToHashSet();
-        foreach (NCard node in playContainer.GetChildren().OfType<NCard>().ToList())
-        {
-            if (node.Model == null || !playCards.Contains(node.Model))
-            {
-                RemoveCardNodeImmediately(node);
-            }
-        }
     }
 
     private static void RemoveCardNodeImmediately(NCard node)
