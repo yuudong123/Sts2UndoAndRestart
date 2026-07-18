@@ -21,8 +21,7 @@ internal sealed class RunStateSnapshot
     private RunStateSnapshot(RunState runState)
     {
         _runState = runState;
-        _allCards = ReflectionUtil.GetField<List<CardModel>>(runState, "_allCards")?.ToList()
-            ?? new List<CardModel>();
+        _allCards = ReflectionUtil.GetRequiredField<List<CardModel>>(runState, "_allCards").ToList();
         _extraFields = ObjectGraphSnapshot.Capture(runState.ExtraFields);
         _rng = ObjectGraphSnapshot.Capture(runState.Rng);
         _odds = ObjectGraphSnapshot.Capture(runState.Odds);
@@ -41,8 +40,7 @@ internal sealed class RunStateSnapshot
     public void Restore()
     {
         ReflectionUtil.ReplaceList(
-            ReflectionUtil.GetField<List<CardModel>>(_runState, "_allCards")
-                ?? throw new InvalidOperationException("RunState._allCards was not found."),
+            ReflectionUtil.GetRequiredField<List<CardModel>>(_runState, "_allCards"),
             _allCards);
         _extraFields.Restore(_runState.ExtraFields);
         _rng.Restore(_runState.Rng);
@@ -66,8 +64,7 @@ internal sealed class RunStateSnapshot
             _goldProportion = room.GoldProportion;
             _extraRewards =
                 (Dictionary<Player, List<Reward>>)ObjectGraphSnapshot.CloneValue(
-                    ReflectionUtil.GetField<Dictionary<Player, List<Reward>>>(room, "_extraRewards")
-                        ?? new Dictionary<Player, List<Reward>>())!;
+                    ReflectionUtil.GetRequiredField<Dictionary<Player, List<Reward>>>(room, "_extraRewards"))!;
         }
 
         public static CombatRoomSnapshot Capture(CombatRoom room)
@@ -80,12 +77,8 @@ internal sealed class RunStateSnapshot
             ReflectionUtil.SetField(_room, "_isPreFinished", _isPreFinished);
             ReflectionUtil.SetField(_room, "<GoldProportion>k__BackingField", _goldProportion);
 
-            Dictionary<Player, List<Reward>>? destination =
-                ReflectionUtil.GetField<Dictionary<Player, List<Reward>>>(_room, "_extraRewards");
-            if (destination == null)
-            {
-                throw new InvalidOperationException("CombatRoom._extraRewards was not found.");
-            }
+            Dictionary<Player, List<Reward>> destination =
+                ReflectionUtil.GetRequiredField<Dictionary<Player, List<Reward>>>(_room, "_extraRewards");
 
             destination.Clear();
             foreach ((Player player, List<Reward> rewards) in _extraRewards)

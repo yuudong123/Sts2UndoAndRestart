@@ -27,33 +27,34 @@ internal static class FloorRestartService
     private const string FadeTransitionPath = "res://materials/transitions/fade_transition_mat.tres";
     private static bool _isRestarting;
 
-    public static void HandleQuickRestartKey()
+    public static bool HandleQuickRestartKey()
     {
         RunManager runManager = RunManager.Instance;
-        if (!runManager.IsInProgress)
+        if (_isRestarting || !runManager.IsInProgress)
         {
-            return;
+            return false;
         }
 
         if (runManager.NetService.Type != NetGameType.Singleplayer)
         {
             MainFile.Logger.Info("Ignored F5 quick restart request during multiplayer.");
-            return;
+            return false;
         }
 
         NGame? game = NGame.Instance;
         if (game == null || runManager.IsGameOver || game.Transition.InTransition)
         {
-            return;
+            return false;
         }
 
-        if (HasPendingGameAction(runManager))
+        if (HasPendingRestartWork(runManager))
         {
             MainFile.Logger.Info("Ignored F5 quick restart request while a game action is in progress.");
-            return;
+            return false;
         }
 
         TaskHelper.RunSafely(DoQuickRestart());
+        return true;
     }
 
     private static async Task DoQuickRestart()
@@ -75,17 +76,18 @@ internal static class FloorRestartService
             return;
         }
 
-        if (HasPendingGameAction(runManager))
+        if (HasPendingRestartWork(runManager))
         {
             MainFile.Logger.Info("Quick restart aborted because a game action is in progress.");
             return;
         }
 
         _isRestarting = true;
+        NGame? game = NGame.Instance;
+        bool fadedOut = false;
         MainFile.Logger.Info("F5 quick restart triggered.");
         try
         {
-            NGame? game = NGame.Instance;
             if (game == null)
             {
                 MainFile.Logger.Warn("Quick restart aborted because NGame is unavailable.");
@@ -114,6 +116,7 @@ internal static class FloorRestartService
             runManager.ActionQueueSet.Reset();
             NRunMusicController.Instance?.StopMusic();
             await game.Transition.FadeOut(0.8f, FadeTransitionPath);
+            fadedOut = true;
             runManager.CleanUp(graceful: true);
             CombatRuntimeStateCleanup.ClearCombatTurnFlags();
 
@@ -144,6 +147,7 @@ internal static class FloorRestartService
             RestoreEnemyPositions(savedEnemyPositions);
             RestoreMapDrawings(savedDrawings);
             await game.Transition.FadeIn(0.8f, FadeTransitionPath);
+            fadedOut = false;
             await RestoreMapMarker(game, runState);
             CombatRuntimeStateCleanup.ClearCombatTurnFlags();
             UndoRedoManager.Reset();
@@ -152,6 +156,17 @@ internal static class FloorRestartService
         catch (Exception ex)
         {
             MainFile.Logger.Error($"F5 quick restart failed: {ex}");
+            if (fadedOut && game != null && GodotObject.IsInstanceValid(game))
+            {
+                try
+                {
+                    await game.Transition.FadeIn(0.2f, FadeTransitionPath);
+                }
+                catch (Exception fadeException)
+                {
+                    MainFile.Logger.Error($"Failed to recover the screen after quick restart failure: {fadeException}");
+                }
+            }
         }
         finally
         {
@@ -159,11 +174,17 @@ internal static class FloorRestartService
         }
     }
 
-    private static bool HasPendingGameAction(RunManager runManager)
+    private static bool HasPendingRestartWork(RunManager runManager)
     {
-        return !runManager.ActionQueueSet.IsEmpty ||
-               runManager.ActionExecutor.IsRunning ||
-               runManager.ActionExecutor.CurrentlyRunningAction != null;
+        bool hasImmediateAction = !runManager.ActionQueueSet.IsEmpty ||
+                                  runManager.ActionExecutor.IsRunning ||
+                                  runManager.ActionExecutor.CurrentlyRunningAction != null;
+        if (!CombatManager.Instance.IsInProgress)
+        {
+            return hasImmediateAction;
+        }
+
+        return CombatRuntimeStateCleanup.HasPendingRuntimeWork();
     }
 
     private static SerializableRoom? GetRoomToRestore(SerializableRun save)
@@ -314,16 +335,24 @@ internal static class FloorRestartService
                 return;
             }
 
-            List<NCreature> enemies = room.CreatureNodes.Where(static node => node.Entity.Side == CombatSide.Enemy).ToList();
-            if (enemies.Count != savedEnemyPositions.Count)
+            Dictionary<uint, NCreature> enemiesByCombatId = room.CreatureNodes
+                .Where(static node => node.Entity.Side == CombatSide.Enemy && node.Entity.CombatId.HasValue)
+                .ToDictionary(static node => node.Entity.CombatId!.Value);
+            if (enemiesByCombatId.Count != savedEnemyPositions.Count)
             {
-                MainFile.Logger.Info($"Skipped enemy position restore because count changed ({enemies.Count} vs {savedEnemyPositions.Count}).");
+                MainFile.Logger.Info($"Skipped enemy position restore because count changed ({enemiesByCombatId.Count} vs {savedEnemyPositions.Count}).");
                 return;
             }
 
-            for (int i = 0; i < enemies.Count; i++)
+            foreach ((uint combatId, Vector2 position) in savedEnemyPositions)
             {
-                enemies[i].Position = savedEnemyPositions[i].Position;
+                if (!enemiesByCombatId.TryGetValue(combatId, out NCreature? enemy))
+                {
+                    MainFile.Logger.Info($"Skipped enemy position restore because combat id {combatId} was not found.");
+                    return;
+                }
+
+                enemy.Position = position;
             }
         }
         catch (Exception ex)

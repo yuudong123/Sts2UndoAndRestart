@@ -3,9 +3,9 @@
 ## Scope
 
 This audit uses the public-beta `v0.109.0` game assembly (`c12f634d`) and the
-official 0.109 patch notes. The retained 0.107 decompilation is used as the
-structural comparison baseline because a complete 0.108 assembly is not stored
-in this repository.
+official 0.109 patch notes. The current mod source targets this game version
+only. Older game versions are supported by their matching historical releases,
+not by compatibility branches in the current binary.
 
 The 0.109 assembly contains the following gameplay model files:
 
@@ -24,21 +24,16 @@ The audit also covers snapshot boundaries, action and choice synchronization,
 combat and run history, floor restart serialization, transient combat UI, and
 every Harmony patch or reflection member used by the mod.
 
-## Compatibility fixes
+## 0.109 implementation
 
 ### RNG state
 
-0.109 replaced the old `Rng.Seed` and `Rng.Counter` reconstruction API with a
-stateful `MegaRandom` implementation. The complete RNG state now consists of a
-counter and four `ulong` state values exposed through `SerializableRng`.
+The complete 0.109 RNG state consists of a counter and four `ulong` state
+values exposed through `SerializableRng`.
 
-`ObjectGraphSnapshot.CloneRng` now selects the available API at runtime:
-
-- 0.109 and later: `ToSerializable()` plus the serializable constructor.
-- Legacy versions: `Seed`, `Counter`, and the constructor matching the runtime
-  seed type (`uint` in 0.107).
-- Unknown API shapes: the proven legacy object-graph clone remains as a final
-  fallback so an RNG API mismatch cannot disable all snapshot capture.
+`ObjectGraphSnapshot` uses `ToSerializable()` and the `SerializableRng`
+constructor directly. There is no legacy constructor or object-graph fallback
+in the current binary.
 
 This preserves exact future random results instead of merely restoring the
 number of calls. A focused test consumed one value, cloned the RNG, and verified
@@ -56,10 +51,9 @@ guard, but intentionally leaves `_wasReset` under vanilla reset/startup control.
 
 ### Potion interaction state
 
-The player potion lock was renamed from `_canRemovePotions` to
-`_canUseOrRemovePotions`. Capture and restore probe both field names and notify
-the matching old or new change event, preserving compatibility across game
-versions.
+The player potion lock is captured and restored through the 0.109
+`Player.CanUseOrRemovePotions` property so its matching change event is raised
+by vanilla code.
 
 ### Card VFX cleanup
 
@@ -67,45 +61,114 @@ versions.
 `NCardRemoveVfx`. These nodes can outlive the action briefly and retain their
 own `NCard`, so restoring during that delay can leave a stale card on screen.
 
-Restore now removes these nodes from combat UI and global VFX containers. The
-new types are recognized by full type name rather than a direct assembly
-reference, so older game versions can still load the same mod binary.
+Restore now removes these nodes from combat UI and global VFX containers using
+direct 0.109 type references.
 
 ## New gameplay state review
 
-### New and reworked cards
+The official 0.109 notes were mapped to the implementation classes below. This
+review follows complete feature flows rather than checking each model name in
+isolation.
 
+### Dowsing Rod quest flow
+
+- `DowsingRod.AfterObtained` creates a run-scoped `Dowsing` card and adds it to
+  the permanent deck.
+- `Dowsing.AfterRoomEntered` increments the saved `_roomsEntered` field when an
+  unknown room is entered. At five rooms it completes the quest and calls
+  `CardCmd.TransformTo<Abundance>` on the permanent card.
+- A combat deck can already have been cloned before the room-entry transform
+  finishes. The valid fifth-room combat state is therefore permanent
+  `Abundance` plus a separate combat `Dowsing` clone. The run registry, permanent
+  deck, combat registry, and combat piles must not be merged.
+- The snapshot captures both card identities independently. Snapshot capture
+  repairs a missing permanent-deck registration in `RunState._allCards`, removes
+  that permanent card from `CombatState._allCards`, and clears an invalid
+  removed-state flag. This was required after a real 0.109 run exposed
+  `Abundance` in the deck but registered through the combat scope.
 - `Abundance` uses combat-card-generation RNG, a player choice, a generated
-  card, and a temporary free-this-turn cost. The RNG set, choice counters,
-  card registry, card fields, dynamic variables, energy cost, and piles are all
-  captured.
-- `Eidolon` awaits every auto-play inside its parent `PlayCardAction`. It does
-  not enqueue separate manual play actions, so the whole chain remains one
-  undo transaction.
-- `TheBall` stores cumulative damage in `_extraDamageFromPlays`; generic card
-  model capture includes it.
-- `PillarOfCreationPower` queries `CardGeneratedEntry` history. Combat history
-  is restored before card values and UI are refreshed.
-- `WellLaidPlansPower` changes hand flushing through the power model. The power
-  and exact ordered hand are both restored.
-- New multiplayer-only cards and powers may contain player references and
-  readonly dictionaries. Generic model capture preserves model identity and
-  restores readonly containers in place. Undo and floor restart remain blocked
-  in real multiplayer runs.
+  Power card, and `SetToFreeThisTurn`. The run/combat RNG sets, choice IDs,
+  generated card identity, complete card object graph, cost state, and ordered
+  piles are captured.
 
-### New relic and potion state
+### Neow's Sacrifice quest flow
 
-- `HistoryCourse` reads the previous turn's completed attack from combat
-  history. Restoring history preserves its deterministic replay target.
-- `AmbergrisPower` grants an extra turn. Power amount and
-  `_playersTakingExtraTurn` are both captured, so undoing across the extra-turn
-  boundary restores the semantic turn state.
-- `Dowsing` stores `_roomsEntered` as a saved property and changes only when an
-  unknown room is entered. Combat undo does not modify this out-of-combat quest
-  counter. Floor restart uses the game's room-entry save rather than a combat
-  snapshot, so it remains on the vanilla serialization path.
-- Diamond Diadem's new block and Blur behavior uses ordinary creature block and
-  power state, both already covered.
+- `NeowsSacrifice.AfterObtained` procures `Ambergris` and creates a run-scoped
+  `Guilty` card in the permanent deck.
+- `Guilty` stores `_combatsSeen` as a saved property, updates its dynamic
+  variable, and removes itself after the fifth completed combat. Permanent deck
+  cards and their dynamic variables are included in model capture. Combat undo
+  cannot cross the completed-combat hook; floor restart reloads the vanilla
+  room-entry save.
+- `Ambergris` heals the selected player and applies hidden `AmbergrisPower`.
+  Creature HP, potion slots, potion ownership, power amount, and power identity
+  are captured.
+- `AmbergrisPower` schedules an extra turn through
+  `ShouldTakeExtraTurn` and decrements after that turn. Both the power and
+  `CombatManager._playersTakingExtraTurn` are captured, covering snapshots on
+  either side of the extra-turn transition.
+
+### Reworked singleplayer-capable cards and relics
+
+- `DiamondDiadem` grants normal block and `BlurPower` on the first turn. The
+  creature block, power model, turn number, and relic state are captured.
+- `HistoryCourse` now selects only the previous turn's completed non-dupe
+  Attack from `CombatHistory`. The exact history entries and referenced card
+  identity are restored.
+- `Mirage` applies `EnergyNextTurnPower`; power amount and ownership are covered
+  by creature power/model capture.
+- `WellLaidPlansPower.ShouldFlush` prevents hand flushing. Power presence and
+  the exact ordered hand are restored together.
+- `Expertise` applies the card field used by single-turn Retain to each drawn
+  card. Full card model capture includes that flag, while pile capture preserves
+  the draw result and hand order.
+- `PillarOfCreationPower` determines its first generated card by querying
+  `CardGeneratedEntry` history for the current turn. Combat history is restored
+  before card UI refresh.
+- `Eidolon` awaits each Ethereal auto-play in sequence. Snapshots are deferred
+  until the action queue, choice synchronizer, and card/potion effect depth are
+  settled, so a partial auto-play chain is not accepted as a manual restore
+  target.
+- Card transform, transform-shine, enchant, smith, and upgrade VFX are treated
+  as transient restore-time nodes so a delayed or accelerated animation cannot
+  leave a stale card above the combat UI.
+
+### Multiplayer-only changes
+
+- `Tutor`, `TheBall`, `ImitationLearning`, `OneForAll`, `Unmovable`,
+  `Underworld`, `Hibernate`, `HuddleUp`, and the other changed multiplayer
+  cards can contain target-player references, generated clones, internal
+  dictionaries, and cross-player piles. The generic object graph preserves
+  those identities, but undo, redo, and floor restart are intentionally blocked
+  whenever the run is not singleplayer.
+- 0.109 allowing most potions to target another player therefore does not add a
+  supported singleplayer snapshot path.
+
+### Balance-only changes
+
+The remaining official changes alter canonical numbers, rarity, pools, text,
+art, or enemy move selection. They add no mutable snapshot field: Aeonglass,
+Torchhead Amalgam, Demon Form, Expect a Fight, Primal Force, Taunt,
+Bloodletting, Cruelty, Dominate, Outbreak, Accelerant, Collision Course,
+Hyperbeam, Sunder, Trash to Treasure, Midnight, Blade Symphony, Sand Castle,
+Meat Cleaver, Toybox, Fiddle, Sere Talon, and Distinguished Cape.
+
+The Soulbound shuffle correction changes the destination pile only. Exact pile
+membership and order were already captured.
+
+The Expose/Hand Drill correction changes hook dispatch only and introduces no
+new persistent combat field.
+
+### Seed and serialization changes
+
+- The 12-character/larger internal seed change does not affect combat snapshot
+  storage because the mod captures the instantiated RNG states rather than
+  parsing or reconstructing the display seed.
+- Floor restart loads `SerializableRun` through the current vanilla save API,
+  so it receives the current seed representation without a mod-owned conversion.
+- The `SavedPropertySerializationCache` merge into
+  `ModelIdSerializationCache` affects model hashing and serialization metadata,
+  not the in-memory model fields captured by undo.
 
 ## API and reflection review
 
@@ -135,20 +198,36 @@ its code does not add model IDs or saved properties to multiplayer hashes.
 Static analysis cannot validate animation timing or every asynchronous hook.
 The following scenarios are the highest-value in-game checks for 0.109:
 
-1. Undo and redo after Abundance creates a free power card, then play that card.
-2. Undo and redo after Eidolon auto-plays multiple Ethereal exhaust cards.
-3. Cross an Ambergris extra turn in both directions and then end the turn.
-4. Trigger History Course and Pillar of Creation, restore, and trigger them
+1. Enter the fifth unknown room as a combat with Dowsing: confirm the permanent
+   deck contains Abundance while that combat still contains Dowsing, then undo
+   and redo without changing either identity.
+2. Undo and redo after Abundance creates a free Power card, then play that card.
+3. Use Ambergris, undo and redo its heal/potion/power state, then cross its extra
+   turn in both directions and end the turn.
+4. Complete the fifth Guilty combat, restart the room, and confirm the permanent
+   quest counter/removal follows the vanilla room-entry save exactly once.
+5. Undo and redo after Eidolon auto-plays multiple Ethereal exhaust cards.
+6. Trigger History Course and Pillar of Creation, restore, and trigger them
    again without duplicate history effects.
-5. Undo immediately after normal and quick exhaust animations begin; no card or
+7. Undo Mirage and Expertise and confirm next-turn Energy and single-turn Retain
+   return to their exact prior values.
+8. Undo immediately after normal and quick exhaust animations begin; no card or
    exhaust VFX should remain floating.
-6. Restart a combat and an unknown room while Dowsing is in the deck; room
-   progress should neither duplicate nor disappear.
-7. Use undo repeatedly around a multi-enemy death and confirm targeting,
+9. Use undo repeatedly around a multi-enemy death and confirm targeting,
    rewards, and the next turn transition still work.
+10. Undo after a card play and confirm the hand is in `Play` mode, peek mode is
+   closed, no holder is awaiting play, and mouse and shortcut input both work.
 
 ## Result
 
-No uncovered 0.109 gameplay field requires a new per-card or per-relic special
-case. The compatibility-sensitive changes are centralized in RNG cloning,
-runtime guard normalization, potion lock probing, and transient VFX cleanup.
+The renewed feature-flow audit found one uncovered invariant: during the
+Dowsing-to-Abundance transition, `CardModel.CardScope` falls back to the owner's
+active combat state even though Dowsing is in the permanent deck. The new
+Abundance can therefore be registered in `CombatState._allCards` while being
+placed in the permanent deck. Snapshot capture now moves permanent-deck card
+registration to the run scope generically rather than special-casing Abundance.
+
+No other official 0.109 gameplay change requires a per-card or per-relic restore
+path. All remaining mutable state maps to the card model graph, creature powers,
+ordered piles, combat history, RNG sets, potion slots, or turn-transition fields
+already captured by the current implementation.

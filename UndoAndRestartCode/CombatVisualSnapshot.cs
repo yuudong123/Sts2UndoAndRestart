@@ -104,9 +104,8 @@ internal sealed class CombatVisualSnapshot
                 ReflectionUtil.SetField(node, "_tempScale", _tempScale.Value);
             }
 
-            RestoreTrackTimesOnly(node, creature);
-
             NormalizeModelDrivenUi(node, creature);
+            RestoreTrackTimesOnly(node, creature);
         }
 
         private void RestoreTrackTimesOnly(NCreature node, Creature creature)

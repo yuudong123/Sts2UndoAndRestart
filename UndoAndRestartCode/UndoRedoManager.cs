@@ -116,10 +116,10 @@ internal static class UndoRedoManager
 
         if (PendingEntries.Count > 0)
         {
-            ActionHistoryEntry entry = PendingEntries[0];
+            ActionHistoryEntry pendingEntry = PendingEntries[0];
             PendingEntries.RemoveAt(0);
-            entry.SnapshotIndex = snapshotIndex;
-            ActionEntries.Add(entry);
+            pendingEntry.SnapshotIndex = snapshotIndex;
+            ActionEntries.Add(pendingEntry);
             TrimActionEntriesToSnapshots();
         }
 
@@ -143,6 +143,7 @@ internal static class UndoRedoManager
     }
 
     public static int CurrentSnapshotIndex => _cursor;
+    public static int SnapshotCount => Snapshots.Count;
 
     public static void TryRestoreSnapshot(int target)
     {
@@ -173,12 +174,6 @@ internal static class UndoRedoManager
                 MainFile.Logger.Info(
                     $"Snapshot capture took {timer.ElapsedMilliseconds} ms: {reason}");
             }
-            if (_cursor >= 0 && _cursor < Snapshots.Count && Snapshots[_cursor].Fingerprint == snapshot.Fingerprint)
-            {
-                MainFile.Logger.Debug($"Skipped duplicate snapshot {reason}.");
-                return -1;
-            }
-
             if (_cursor < Snapshots.Count - 1)
             {
                 Snapshots.RemoveRange(_cursor + 1, Snapshots.Count - _cursor - 1);
@@ -187,7 +182,14 @@ internal static class UndoRedoManager
 
             Snapshots.Add(snapshot);
             TrimSnapshotsToLimit();
-            _cursor = Snapshots.Count - 1;
+            _cursor = Snapshots.IndexOf(snapshot);
+            if (_cursor < 0)
+            {
+                _cursor = Snapshots.Count - 1;
+                MainFile.Logger.Info($"Discarded snapshot {reason} because the configured limit is full.");
+                return -1;
+            }
+
             MainFile.Logger.Info($"Captured snapshot {_cursor + 1}/{Snapshots.Count}: {reason}");
             ActionHistoryOverlay.Refresh();
             return _cursor;
@@ -263,6 +265,17 @@ internal static class UndoRedoManager
             return false;
         }
 
+        CombatSnapshot rollbackSnapshot;
+        try
+        {
+            rollbackSnapshot = CombatSnapshot.Capture(state, "restore-rollback");
+        }
+        catch (Exception ex)
+        {
+            MainFile.Logger.Error($"Undo/redo blocked because rollback snapshot capture failed: {ex}");
+            return false;
+        }
+
         _isRestoring = true;
         _readyCaptureRequestId++;
         try
@@ -283,6 +296,16 @@ internal static class UndoRedoManager
         catch (Exception ex)
         {
             MainFile.Logger.Error($"Failed to restore snapshot: {ex}");
+            try
+            {
+                rollbackSnapshot.Restore(validate: false);
+                MainFile.Logger.Warn("Restored the pre-operation state after snapshot restore failure.");
+            }
+            catch (Exception rollbackEx)
+            {
+                MainFile.Logger.Error($"Failed to restore the pre-operation rollback snapshot: {rollbackEx}");
+            }
+
             return false;
         }
         finally
@@ -350,6 +373,14 @@ internal static class UndoRedoManager
 
     private static void CapturePlayerControlReadySnapshot()
     {
+        bool needsSnapshot = Snapshots.Count == 0 ||
+                             PendingEntries.Count > 0 ||
+                             _pendingTurnTransitionTurnNumber is > 1;
+        if (!needsSnapshot)
+        {
+            return;
+        }
+
         int snapshotIndex = Capture("PlayerControlReady", strictPlayPhase: true);
         if (snapshotIndex < 0)
         {
@@ -444,6 +475,20 @@ internal static class UndoRedoManager
 
     private static bool IsRuntimeSettled(out string reason)
     {
+        try
+        {
+            return IsRuntimeSettledCore(out reason);
+        }
+        catch (Exception ex)
+        {
+            MainFile.Logger.Error($"Failed to inspect undo/redo runtime state: {ex}");
+            reason = "runtime state inspection failed";
+            return false;
+        }
+    }
+
+    private static bool IsRuntimeSettledCore(out string reason)
+    {
         if (!RunManager.Instance.ActionQueueSet.IsEmpty)
         {
             CombatRuntimeStateCleanup.ResetRuntimeBlockerObservation();
@@ -458,31 +503,33 @@ internal static class UndoRedoManager
             return false;
         }
 
-        IList? waitingActions =
-            ReflectionUtil.GetField<IList>(RunManager.Instance.ActionQueueSet, "_actionsWaitingForResumption");
-        if (waitingActions?.Count > 0)
+        IList waitingActions = ReflectionUtil.GetRequiredField<IList>(
+            RunManager.Instance.ActionQueueSet,
+            "_actionsWaitingForResumption");
+        if (waitingActions.Count > 0)
         {
             CombatRuntimeStateCleanup.ResetRuntimeBlockerObservation();
             reason = "an action is waiting for a player choice";
             return false;
         }
 
-        IList? hookActions =
-            ReflectionUtil.GetField<IList>(RunManager.Instance.ActionQueueSynchronizer, "_hookActions");
-        IList? requestedActions =
-            ReflectionUtil.GetField<IList>(
-                RunManager.Instance.ActionQueueSynchronizer,
-                "_requestedActionsWaitingForPlayerTurn");
-        if (hookActions?.Count > 0 || requestedActions?.Count > 0)
+        IList hookActions = ReflectionUtil.GetRequiredField<IList>(
+            RunManager.Instance.ActionQueueSynchronizer,
+            "_hookActions");
+        IList requestedActions = ReflectionUtil.GetRequiredField<IList>(
+            RunManager.Instance.ActionQueueSynchronizer,
+            "_requestedActionsWaitingForPlayerTurn");
+        if (hookActions.Count > 0 || requestedActions.Count > 0)
         {
             CombatRuntimeStateCleanup.ResetRuntimeBlockerObservation();
             reason = "synchronized actions are still pending";
             return false;
         }
 
-        Dictionary<Player, int>? effectDepth =
-            ReflectionUtil.GetField<Dictionary<Player, int>>(CombatManager.Instance, "_cardOrPotionEffectDepth");
-        if (effectDepth?.Values.Any(depth => depth != 0) == true)
+        Dictionary<Player, int> effectDepth = ReflectionUtil.GetRequiredField<Dictionary<Player, int>>(
+            CombatManager.Instance,
+            "_cardOrPotionEffectDepth");
+        if (effectDepth.Values.Any(depth => depth != 0))
         {
             reason = "card or potion effect is still executing";
             if (CombatRuntimeStateCleanup.TryRecoverStaleRuntimeBlocker(
@@ -496,9 +543,10 @@ internal static class UndoRedoManager
             return false;
         }
 
-        IList? receivedChoices =
-            ReflectionUtil.GetField<IList>(RunManager.Instance.PlayerChoiceSynchronizer, "_receivedChoices");
-        if (receivedChoices?.Count > 0)
+        IList receivedChoices = ReflectionUtil.GetRequiredField<IList>(
+            RunManager.Instance.PlayerChoiceSynchronizer,
+            "_receivedChoices");
+        if (receivedChoices.Count > 0)
         {
             reason = "player choice is pending";
             if (CombatRuntimeStateCleanup.TryRecoverStaleRuntimeBlocker(
@@ -541,13 +589,21 @@ internal static class UndoRedoManager
 
     private static void TrimSnapshotsToLimit()
     {
-        int maxSnapshots = UndoAndRestartConfig.SnapshotLimit;
+        int maxSnapshots = Math.Max(0, UndoAndRestartConfig.SnapshotLimit);
         while (Snapshots.Count > maxSnapshots)
         {
-            Snapshots.RemoveAt(0);
+            int removedSnapshotIndex = Snapshots.Count > 1 ? 1 : 0;
+            Snapshots.RemoveAt(removedSnapshotIndex);
             foreach (ActionHistoryEntry entry in ActionEntries)
             {
-                entry.SnapshotIndex--;
+                if (entry.SnapshotIndex == removedSnapshotIndex)
+                {
+                    entry.SnapshotIndex = -1;
+                }
+                else if (entry.SnapshotIndex > removedSnapshotIndex)
+                {
+                    entry.SnapshotIndex--;
+                }
             }
 
             ActionEntries.RemoveAll(entry => entry.SnapshotIndex < 0);

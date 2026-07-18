@@ -10,33 +10,32 @@ namespace UndoAndRestartCode;
 
 internal static class CombatRuntimeStateCleanup
 {
-    private const int staleRuntimeBlockerMinObservations = 5;
-    private const ulong staleRuntimeBlockerMinMillis = 1500;
+    private const int StaleRuntimeBlockerMinObservations = 5;
+    private const ulong StaleRuntimeBlockerMinMillis = 1500;
 
-    private static string? observedRuntimeBlockerReason;
-    private static int observedRuntimeBlockerCount;
-    private static ulong observedRuntimeBlockerFirstTick;
+    private static string? _observedRuntimeBlockerReason;
+    private static int _observedRuntimeBlockerCount;
+    private static ulong _observedRuntimeBlockerFirstTick;
 
     public static void ClearCombatTurnFlags()
     {
-        ReflectionUtil.SetField(CombatManager.Instance, "_playerToEnemyTransitionFired", false);
-        ReflectionUtil.SetField(CombatManager.Instance, "_inPlayerTurnSetup", false);
-        ReflectionUtil.SetField(CombatManager.Instance, "_deferredEndTurnTransition", null);
-        ReflectionUtil.SetField(CombatManager.Instance, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
-        ReflectionUtil.SetField(CombatManager.Instance, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
+        ReflectionUtil.SetRequiredField(CombatManager.Instance, "_playerToEnemyTransitionFired", false);
+        ReflectionUtil.SetRequiredField(CombatManager.Instance, "_inPlayerTurnSetup", false);
+        ReflectionUtil.SetRequiredField(CombatManager.Instance, "_deferredEndTurnTransition", null);
+        ReflectionUtil.SetRequiredField(CombatManager.Instance, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
+        ReflectionUtil.SetRequiredField(CombatManager.Instance, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
     }
 
     public static bool TryClearStaleEndingTurnFlagsIfPlayerControlAvailable(CombatState state)
     {
-        if (!canTreatCurrentStateAsPlayable(state) ||
-            hasRuntimeWorkThatShouldNotBeCleared())
+        if (!CanTreatCurrentStateAsPlayable(state) || HasPendingRuntimeWork())
         {
             return false;
         }
 
-        ReflectionUtil.SetField(CombatManager.Instance, "_playerToEnemyTransitionFired", false);
-        ReflectionUtil.SetField(CombatManager.Instance, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
-        ReflectionUtil.SetField(CombatManager.Instance, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
+        ReflectionUtil.SetRequiredField(CombatManager.Instance, "_playerToEnemyTransitionFired", false);
+        ReflectionUtil.SetRequiredField(CombatManager.Instance, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
+        ReflectionUtil.SetRequiredField(CombatManager.Instance, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
         MainFile.Logger.Info("Cleared stale ending-turn flags while player control was available.");
         return true;
     }
@@ -46,44 +45,44 @@ internal static class CombatRuntimeStateCleanup
         RuntimeBlockerKind kind,
         object blocker)
     {
-        if (!canConsiderRuntimeBlockerStale())
+        if (!CanConsiderRuntimeBlockerStale())
         {
             ResetRuntimeBlockerObservation();
             return false;
         }
 
         ulong now = Time.GetTicksMsec();
-        if (observedRuntimeBlockerReason != reason)
+        if (_observedRuntimeBlockerReason != reason)
         {
-            observedRuntimeBlockerReason = reason;
-            observedRuntimeBlockerCount = 1;
-            observedRuntimeBlockerFirstTick = now;
+            _observedRuntimeBlockerReason = reason;
+            _observedRuntimeBlockerCount = 1;
+            _observedRuntimeBlockerFirstTick = now;
             return false;
         }
 
-        observedRuntimeBlockerCount++;
-        if (observedRuntimeBlockerCount < staleRuntimeBlockerMinObservations ||
-            now - observedRuntimeBlockerFirstTick < staleRuntimeBlockerMinMillis)
+        _observedRuntimeBlockerCount++;
+        if (_observedRuntimeBlockerCount < StaleRuntimeBlockerMinObservations ||
+            now - _observedRuntimeBlockerFirstTick < StaleRuntimeBlockerMinMillis)
         {
             return false;
         }
 
         return kind switch
         {
-            RuntimeBlockerKind.EffectDepth => clearStaleEffectDepth(blocker),
-            RuntimeBlockerKind.ReceivedChoices => clearStaleSingleplayerReceivedChoices(blocker),
+            RuntimeBlockerKind.EffectDepth => ClearStaleEffectDepth(blocker),
+            RuntimeBlockerKind.ReceivedChoices => ClearStaleSingleplayerReceivedChoices(blocker),
             _ => false,
         };
     }
 
     public static void ResetRuntimeBlockerObservation()
     {
-        observedRuntimeBlockerReason = null;
-        observedRuntimeBlockerCount = 0;
-        observedRuntimeBlockerFirstTick = 0;
+        _observedRuntimeBlockerReason = null;
+        _observedRuntimeBlockerCount = 0;
+        _observedRuntimeBlockerFirstTick = 0;
     }
 
-    private static bool clearStaleEffectDepth(object blocker)
+    private static bool ClearStaleEffectDepth(object blocker)
     {
         ((Dictionary<Player, int>)blocker).Clear();
         MainFile.Logger.Warn("Cleared stale card/potion effect depth after player control was available.");
@@ -91,7 +90,7 @@ internal static class CombatRuntimeStateCleanup
         return true;
     }
 
-    private static bool clearStaleSingleplayerReceivedChoices(object blocker)
+    private static bool ClearStaleSingleplayerReceivedChoices(object blocker)
     {
         if (RunManager.Instance.NetService.Type != NetGameType.Singleplayer)
         {
@@ -104,12 +103,11 @@ internal static class CombatRuntimeStateCleanup
         return true;
     }
 
-    private static bool canConsiderRuntimeBlockerStale()
+    private static bool CanConsiderRuntimeBlockerStale()
     {
         CombatState? state = CombatManager.Instance.DebugOnlyGetState();
         if (state == null ||
-            !canTreatCurrentStateAsPlayable(state) ||
-            hasImmediateRuntimeWork())
+            !CanTreatCurrentStateAsPlayable(state) || HasImmediateRuntimeWork())
         {
             return false;
         }
@@ -125,7 +123,7 @@ internal static class CombatRuntimeStateCleanup
         }
     }
 
-    private static bool canTreatCurrentStateAsPlayable(CombatState state)
+    private static bool CanTreatCurrentStateAsPlayable(CombatState state)
     {
         return CombatManager.Instance.IsInProgress &&
                state.CurrentSide == CombatSide.Player &&
@@ -135,48 +133,64 @@ internal static class CombatRuntimeStateCleanup
                state.Players.All(player => player.PlayerCombatState?.Phase == PlayerTurnPhase.Play);
     }
 
-    private static bool hasImmediateRuntimeWork()
+    private static bool HasImmediateRuntimeWork()
     {
         return !RunManager.Instance.ActionQueueSet.IsEmpty ||
                RunManager.Instance.ActionExecutor.IsRunning ||
                RunManager.Instance.ActionExecutor.CurrentlyRunningAction != null;
     }
 
-    private static bool hasRuntimeWorkThatShouldNotBeCleared()
+    internal static bool HasPendingRuntimeWork()
     {
-        if (hasImmediateRuntimeWork())
+        try
+        {
+            return HasPendingRuntimeWorkCore();
+        }
+        catch (Exception ex)
+        {
+            MainFile.Logger.Error($"Failed to inspect pending combat runtime work: {ex}");
+            return true;
+        }
+    }
+
+    private static bool HasPendingRuntimeWorkCore()
+    {
+        if (HasImmediateRuntimeWork())
         {
             return true;
         }
 
-        IList? waitingActions =
-            ReflectionUtil.GetField<IList>(RunManager.Instance.ActionQueueSet, "_actionsWaitingForResumption");
-        if (waitingActions?.Count > 0)
+        IList waitingActions = ReflectionUtil.GetRequiredField<IList>(
+            RunManager.Instance.ActionQueueSet,
+            "_actionsWaitingForResumption");
+        if (waitingActions.Count > 0)
         {
             return true;
         }
 
-        IList? hookActions =
-            ReflectionUtil.GetField<IList>(RunManager.Instance.ActionQueueSynchronizer, "_hookActions");
-        IList? requestedActions =
-            ReflectionUtil.GetField<IList>(
-                RunManager.Instance.ActionQueueSynchronizer,
-                "_requestedActionsWaitingForPlayerTurn");
-        if (hookActions?.Count > 0 || requestedActions?.Count > 0)
+        IList hookActions = ReflectionUtil.GetRequiredField<IList>(
+            RunManager.Instance.ActionQueueSynchronizer,
+            "_hookActions");
+        IList requestedActions = ReflectionUtil.GetRequiredField<IList>(
+            RunManager.Instance.ActionQueueSynchronizer,
+            "_requestedActionsWaitingForPlayerTurn");
+        if (hookActions.Count > 0 || requestedActions.Count > 0)
         {
             return true;
         }
 
-        Dictionary<Player, int>? effectDepth =
-            ReflectionUtil.GetField<Dictionary<Player, int>>(CombatManager.Instance, "_cardOrPotionEffectDepth");
-        if (effectDepth?.Values.Any(depth => depth != 0) == true)
+        Dictionary<Player, int> effectDepth = ReflectionUtil.GetRequiredField<Dictionary<Player, int>>(
+            CombatManager.Instance,
+            "_cardOrPotionEffectDepth");
+        if (effectDepth.Values.Any(depth => depth != 0))
         {
             return true;
         }
 
-        IList? receivedChoices =
-            ReflectionUtil.GetField<IList>(RunManager.Instance.PlayerChoiceSynchronizer, "_receivedChoices");
-        return receivedChoices?.Count > 0;
+        IList receivedChoices = ReflectionUtil.GetRequiredField<IList>(
+            RunManager.Instance.PlayerChoiceSynchronizer,
+            "_receivedChoices");
+        return receivedChoices.Count > 0;
     }
 }
 

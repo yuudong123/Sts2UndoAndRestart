@@ -6,6 +6,22 @@
 
 `Undo And Restart` is a Slay the Spire 2 C# mod that adds undo, redo, floor restart, and an action history tab for combat.
 
+The current source targets STS2 `0.109.0` only. Older game versions must use a matching historical mod release.
+
+Mod versions follow `<game version>.<mod patch number>`. The first release for
+STS2 `0.109.0` is `0.109.0.1`; additional mod-only fixes increment the final
+number. Every Workshop update note must state the supported game version.
+
+Workshop update notes use this format:
+
+```text
+Game version : x.x.x
+Mod version : x.x.x.x
+
+- Change 1
+- Change 2
+```
+
 ### Features
 
 - Undo: default key is left arrow.
@@ -86,6 +102,23 @@ The broad refactoring pass, code specifications, and README were drafted with Co
 ## 한국어
 
 `Undo And Restart`는 Slay the Spire 2 전투 중 되돌리기, 다시 실행, 층 다시 시작, 사용 기록 탭을 추가하는 C# 모드입니다.
+
+현재 소스는 STS2 `0.109.0`만 지원합니다. 이전 게임 버전에서는 해당 버전에 맞는 과거 모드 릴리스를 사용해야 합니다.
+
+모드 버전은 `<게임 버전>.<모드 패치 번호>` 형식을 사용합니다. STS2
+`0.109.0`의 첫 배포 버전은 `0.109.0.1`이며, 게임 버전이 그대로인 상태에서
+모드만 추가 수정하면 마지막 번호를 1씩 올립니다. 모든 창작마당 업데이트
+노트에는 지원하는 게임 버전을 명시합니다.
+
+창작마당 업데이트 노트는 다음 형식을 사용합니다.
+
+```text
+Game version : x.x.x
+Mod version : x.x.x.x
+
+- 변경 내용 1
+- 변경 내용 2
+```
 
 ### 기능
 

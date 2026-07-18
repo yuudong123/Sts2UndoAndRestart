@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
@@ -21,8 +20,6 @@ internal sealed class ObjectGraphSnapshot
     private static readonly MethodInfo MemberwiseCloneMethod =
         typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic)!;
     private static readonly Dictionary<Type, FieldInfo[]> FieldCache = new();
-    private static int _hasLoggedRngObjectGraphFallback;
-
     private readonly object _root;
     private readonly Dictionary<FieldInfo, object?> _values = new();
 
@@ -57,20 +54,26 @@ internal sealed class ObjectGraphSnapshot
         Dictionary<object, object> visited = new(ReferenceEqualityComparer.Instance);
         foreach ((FieldInfo field, object? captured) in _values)
         {
+            object? current = field.GetValue(root);
+            if (ReferenceEquals(current, captured))
+            {
+                continue;
+            }
+
+            if (field.IsInitOnly && TryRestoreContainer(current, captured, root, visited))
+            {
+                continue;
+            }
+
             try
             {
-                object? current = field.GetValue(root);
-                if (field.IsInitOnly && TryRestoreContainer(current, captured, root, visited))
-                {
-                    continue;
-                }
-
                 field.SetValue(root, Clone(captured, root, visited));
             }
             catch (Exception ex)
             {
-                MainFile.Logger.Warn(
-                    $"Snapshot field restore failed: {root.GetType().Name}.{field.Name}: {ex.Message}");
+                throw new InvalidOperationException(
+                    $"Snapshot field restore failed: {root.GetType().FullName}.{field.Name}.",
+                    ex);
             }
         }
     }
@@ -78,6 +81,82 @@ internal sealed class ObjectGraphSnapshot
     public static object? CloneValue(object? value, object? owner = null)
     {
         return Clone(value, owner, new Dictionary<object, object>(ReferenceEqualityComparer.Instance));
+    }
+
+    public static IReadOnlyCollection<AbstractModel> FindReferencedModels(object root)
+    {
+        HashSet<AbstractModel> models = new(ReferenceEqualityComparer.Instance);
+        HashSet<object> visited = new(ReferenceEqualityComparer.Instance);
+        Stack<object?> pending = new(
+            EnumerateFields(root.GetType())
+                .Where(field => !ShouldSkipField(field))
+                .Select(field => field.GetValue(root)));
+
+        while (pending.Count > 0)
+        {
+            object? value = pending.Pop();
+            if (value == null)
+            {
+                continue;
+            }
+
+            if (value is AbstractModel model)
+            {
+                if (model.IsMutable)
+                {
+                    models.Add(model);
+                }
+
+                continue;
+            }
+
+            Type type = value.GetType();
+            if (IsAtomic(type) || IsIdentity(value) || ShouldPreserveReference(value) || !visited.Add(value))
+            {
+                continue;
+            }
+
+            if (value is IDictionary dictionary)
+            {
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    pending.Push(entry.Key);
+                    pending.Push(entry.Value);
+                }
+
+                continue;
+            }
+
+            if (value is IEnumerable enumerable && IsCollectionType(type))
+            {
+                foreach (object? item in enumerable)
+                {
+                    pending.Push(item);
+                }
+
+                continue;
+            }
+
+            foreach (FieldInfo field in EnumerateFields(type))
+            {
+                if (!ShouldSkipField(field))
+                {
+                    pending.Push(field.GetValue(value));
+                }
+            }
+        }
+
+        return models;
+    }
+
+    private static bool IsCollectionType(Type type)
+    {
+        return type.IsArray ||
+               typeof(IList).IsAssignableFrom(type) ||
+               type.GetInterfaces().Any(interfaceType =>
+                   interfaceType.IsGenericType &&
+                   (interfaceType.GetGenericTypeDefinition() == typeof(ICollection<>) ||
+                    interfaceType.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>)));
     }
 
     private static object? Clone(
@@ -103,7 +182,9 @@ internal sealed class ObjectGraphSnapshot
 
         if (value is Rng rng)
         {
-            return CloneRng(rng, owner, visited);
+            Rng clone = new(rng.ToSerializable());
+            visited[rng] = clone;
+            return clone;
         }
 
         if (value is CardEnergyCost energyCost && owner is CardModel card)
@@ -178,82 +259,28 @@ internal sealed class ObjectGraphSnapshot
 
             object? child = field.GetValue(value);
             object? childClone = Clone(child, owner, visited);
+            if (ReferenceEquals(child, childClone))
+            {
+                continue;
+            }
+
             try
             {
                 field.SetValue(clone, childClone);
             }
-            catch
+            catch (Exception ex)
             {
                 object? cloneChild = field.GetValue(clone);
-                TryRestoreContainer(cloneChild, childClone, owner, visited);
+                if (!TryRestoreContainer(cloneChild, childClone, owner, visited))
+                {
+                    throw new InvalidOperationException(
+                        $"Snapshot clone failed: {type.FullName}.{field.Name}.",
+                        ex);
+                }
             }
         }
 
         return clone;
-    }
-
-    private static Rng CloneRng(
-        Rng rng,
-        object? owner,
-        Dictionary<object, object> visited)
-    {
-        Type rngType = rng.GetType();
-        MethodInfo? toSerializable = rngType.GetMethod(
-            "ToSerializable",
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-            null,
-            Type.EmptyTypes,
-            null);
-        if (toSerializable != null)
-        {
-            object serializable = toSerializable.Invoke(rng, null)
-                ?? throw new InvalidOperationException("Rng.ToSerializable returned null.");
-            ConstructorInfo? serializableConstructor = rngType.GetConstructor(
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new[] { serializable.GetType() },
-                null);
-            if (serializableConstructor != null)
-            {
-                Rng clone = (Rng)serializableConstructor.Invoke(new[] { serializable });
-                visited[rng] = clone;
-                return clone;
-            }
-        }
-
-        PropertyInfo? seedProperty = rngType.GetProperty(
-            "Seed",
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        PropertyInfo? counterProperty = rngType.GetProperty(
-            "Counter",
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (seedProperty != null && counterProperty != null)
-        {
-            object seed = seedProperty.GetValue(rng)
-                ?? throw new InvalidOperationException("Rng.Seed returned null.");
-            object counter = counterProperty.GetValue(rng)
-                ?? throw new InvalidOperationException("Rng.Counter returned null.");
-            ConstructorInfo? legacyConstructor = rngType.GetConstructor(
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new[] { seed.GetType(), counter.GetType() },
-                null);
-            if (legacyConstructor != null)
-            {
-                Rng clone = (Rng)legacyConstructor.Invoke(new[] { seed, counter });
-                visited[rng] = clone;
-                return clone;
-            }
-        }
-
-        if (Interlocked.Exchange(ref _hasLoggedRngObjectGraphFallback, 1) == 0)
-        {
-            MainFile.Logger.Warn(
-                $"No constructor-based RNG snapshot API was found for {rngType.FullName}; " +
-                "using object-graph cloning fallback.");
-        }
-
-        return (Rng)CloneObjectByFields(rng, owner, visited);
     }
 
     private static bool TryRestoreContainer(
@@ -321,6 +348,11 @@ internal sealed class ObjectGraphSnapshot
 
                 object? sourceValue = field.GetValue(source);
                 object? destinationValue = field.GetValue(destination);
+                if (ReferenceEquals(destinationValue, sourceValue))
+                {
+                    continue;
+                }
+
                 if (field.IsInitOnly &&
                     TryRestoreContainer(destinationValue, sourceValue, owner, visited))
                 {
@@ -331,9 +363,14 @@ internal sealed class ObjectGraphSnapshot
                 {
                     field.SetValue(destination, Clone(sourceValue, owner, visited));
                 }
-                catch
+                catch (Exception ex)
                 {
-                    TryRestoreContainer(destinationValue, sourceValue, owner, visited);
+                    if (!TryRestoreContainer(destinationValue, sourceValue, owner, visited))
+                    {
+                        throw new InvalidOperationException(
+                            $"Snapshot container restore failed: {destinationType.FullName}.{field.Name}.",
+                            ex);
+                    }
                 }
             }
 

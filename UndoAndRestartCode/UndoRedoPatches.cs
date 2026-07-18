@@ -62,8 +62,10 @@ internal static class UndoRedoPatches
         else if ((keyCode == UndoRedoManager.QuickRestartKeyCode || physicalKeyCode == UndoRedoManager.QuickRestartKeyCode) &&
                  UndoInputBindings.ShouldHandleDefaultKeyFallback(UndoInputBindings.RestartAction))
         {
-            FloorRestartService.HandleQuickRestartKey();
-            NGame.Instance?.GetViewport()?.SetInputAsHandled();
+            if (FloorRestartService.HandleQuickRestartKey())
+            {
+                NGame.Instance?.GetViewport()?.SetInputAsHandled();
+            }
         }
     }
 
@@ -85,8 +87,10 @@ internal static class UndoRedoPatches
         }
         else if (UndoInputBindings.IsRestartAction(action))
         {
-            FloorRestartService.HandleQuickRestartKey();
-            NGame.Instance?.GetViewport()?.SetInputAsHandled();
+            if (FloorRestartService.HandleQuickRestartKey())
+            {
+                NGame.Instance?.GetViewport()?.SetInputAsHandled();
+            }
         }
     }
 

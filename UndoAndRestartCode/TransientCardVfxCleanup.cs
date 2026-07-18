@@ -2,6 +2,7 @@ using Godot;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Cards;
 
 namespace UndoAndRestartCode;
 
@@ -61,16 +62,20 @@ internal static class TransientCardVfxCleanup
         if (node is NCardFlyVfx ||
             node is NCardFlyShuffleVfx ||
             node is NCardFlyPowerVfx ||
-            node is NCardTrailVfx)
+            node is NCardTrailVfx ||
+            node is NCardTransformVfx ||
+            node is NCardTransformShineVfx ||
+            node is NCardEnchantVfx ||
+            node is NCardSmithVfx ||
+            node is NCardUpgradeVfx ||
+            node is NCardExhaustVfx ||
+            node is NCardExhaustQuickVfx ||
+            node is NCardRemoveVfx)
         {
             return true;
         }
 
-        // 0.109에서 추가된 타입을 직접 참조하면 이전 게임 버전에서 로드할 수 없음.
-        return node.GetType().FullName is
-            "MegaCrit.Sts2.Core.Nodes.Vfx.Cards.NCardExhaustVfx" or
-            "MegaCrit.Sts2.Core.Nodes.Vfx.Cards.NCardExhaustQuickVfx" or
-            "MegaCrit.Sts2.Core.Nodes.Vfx.Cards.NCardRemoveVfx";
+        return false;
     }
 
     private static void RemoveImmediately(Node node)

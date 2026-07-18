@@ -38,10 +38,12 @@ FloorRestartService
 2. When the action `Task` completes, `CaptureAfterActionAsync` schedules a capture for the next stable player-control boundary.
 3. Stability is checked again from boundaries such as `ActionExecutor.AfterActionFinished`, `ActionQueueSynchronizer.PlayPhase`, and `CombatManager.PlayerActionsDisabledChanged`.
 4. Once the game is actually capturable, `CombatSnapshot.Capture` stores the current state.
-5. Duplicate snapshots are skipped by comparing a state fingerprint.
+5. No partial state fingerprint is used. Actions that only change relic counters or mod-owned internal fields still receive independent snapshots.
 6. If a new action is taken while a redo branch exists, snapshots and action-history entries after the current cursor are removed.
 
 ## Restore Flow
+
+`UndoRedoManager` captures the current state as a rollback snapshot immediately before calling `CombatSnapshot.Restore`. If the target restore or validation fails, it restores that rollback snapshot.
 
 `CombatSnapshot.Restore` restores state in this order:
 
@@ -50,7 +52,7 @@ FloorRestartService
 3. Restores run state and model field snapshots.
 4. Restores combat fields, player state, card piles, potions, relics, and orbs.
 5. Restores combat history and run history.
-6. Restores card runtime state and clears transient relic activation display state.
+6. Sends card UI refresh notifications and clears transient relic activation display state.
 7. Refreshes UI and runs snapshot validation.
 
 The restore process intentionally reuses live objects instead of using the game's normal save/load path. Because of that, Godot nodes, Spine animations, card play nodes, potion holders, relic holders, and other UI state need explicit cleanup and refresh logic.

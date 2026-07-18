@@ -102,6 +102,21 @@ internal static class ReflectionUtil
             : default;
     }
 
+    public static T GetRequiredField<T>(object owner, string name)
+    {
+        FieldInfo field = Field(owner.GetType(), name)
+            ?? throw new MissingFieldException(owner.GetType().FullName, name);
+        object? value = field.GetValue(owner);
+        if (value is T typedValue)
+        {
+            return typedValue;
+        }
+
+        throw new InvalidCastException(
+            $"{owner.GetType().FullName}.{name} expected {typeof(T).FullName}, " +
+            $"but was {value?.GetType().FullName ?? "null"}.");
+    }
+
     public static T? GetStaticField<T>(Type type, string name)
     {
         FieldInfo? field = type.GetField(
@@ -115,6 +130,13 @@ internal static class ReflectionUtil
     public static void SetField(object owner, string name, object? value)
     {
         Field(owner.GetType(), name)?.SetValue(owner, value);
+    }
+
+    public static void SetRequiredField(object owner, string name, object? value)
+    {
+        FieldInfo field = Field(owner.GetType(), name)
+            ?? throw new MissingFieldException(owner.GetType().FullName, name);
+        field.SetValue(owner, value);
     }
 
     public static void ReplaceList<T>(IList<T> destination, IEnumerable<T> source)

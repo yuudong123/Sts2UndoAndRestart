@@ -14,14 +14,12 @@
 | 파일 | 책임 |
 | --- | --- |
 | `UndoRedoManager.cs` | 스냅샷 스택과 커서를 관리합니다. 캡처 가능 조건, undo/redo 이동, 턴 전환 스냅샷, 사용 기록 엔트리 연결을 처리합니다. |
-| `ObjectGraphSnapshot.cs` | 임의 객체의 필드 그래프를 reflection으로 깊은 복제하고 같은 루트 객체에 복원합니다. `Rng`, `CardEnergyCost`, `DynamicVarSet`, 리스트, 딕셔너리, 해시셋 복원에 사용합니다. |
-| `CombatSnapshot.cs` | 핵심 전투 스냅샷입니다. 크리처, 플레이어, 카드, 더미, 포션, 유물, 오브, 전투 히스토리, UI 상태를 캡처하고 복원합니다. |
-| `ModelFieldSnapshot.cs` | `AbstractModel` 기반 객체의 필드 값을 reflection으로 저장하고 복원합니다. |
-| `CardRuntimeSnapshot.cs` | 카드 모델 복원 후 카드 UI와 런타임 표시가 다시 계산되도록 갱신 신호를 보냅니다. |
+| `ObjectGraphSnapshot.cs` | 임의 객체의 필드 그래프를 reflection으로 깊은 복제하고 같은 루트 객체에 복원합니다. 중첩된 mutable `AbstractModel` 탐색과 `Rng`, `CardEnergyCost`, `DynamicVarSet`, 컬렉션 복원도 담당합니다. |
+| `CombatSnapshot.cs` | 핵심 전투 스냅샷입니다. 크리처, 플레이어, 모델, 카드, 더미, 포션, 유물, 오브, 전투 히스토리, UI 상태를 캡처하고 복원하며 카드 UI 갱신 신호도 보냅니다. |
 | `RunStateSnapshot.cs` | 전투 중에도 영향을 받는 런 상태 일부를 저장하고 복원합니다. |
 | `RunHistorySnapshot.cs` | undo/restart가 런 기록과 피해 통계에 누적 오염을 만들지 않도록 런 히스토리를 저장하고 복원합니다. |
 | `CombatVisualSnapshot.cs` | 크리처 위치, 표시 상태, Spine 애니메이션 같은 전투 시각 상태를 저장하고 복원합니다. |
-| `SnapshotValidator.cs` | 복원 후 손패/더미/전투 카드 목록이 플레이 가능한 상태인지 검사하고 경고 로그를 남깁니다. |
+| `SnapshotValidator.cs` | 복원 후 손패 홀더/더미/전투 카드 목록/타게팅이 플레이 가능한 상태인지 검사하고, 불변식 위반 시 복원 롤백을 유도합니다. |
 
 ## UI와 입력
 

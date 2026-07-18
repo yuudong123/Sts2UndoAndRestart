@@ -38,10 +38,12 @@ FloorRestartService
 2. 액션 Task가 완료되면 `CaptureAfterActionAsync`가 플레이어 조작 가능 시점 캡처를 예약합니다.
 3. `ActionExecutor.AfterActionFinished`, `ActionQueueSynchronizer.PlayPhase`, `CombatManager.PlayerActionsDisabledChanged` 같은 경계에서 안정화 여부를 다시 확인합니다.
 4. 실제 캡처 가능 조건을 만족하면 `CombatSnapshot.Capture`가 호출됩니다.
-5. 같은 상태의 중복 스냅샷은 fingerprint 비교로 제거합니다.
+5. 일부 값만 비교하는 fingerprint는 사용하지 않습니다. 유물 스택이나 모드 내부 필드만 바뀐 행동도 독립 스냅샷으로 보존합니다.
 6. redo 브랜치가 남아 있는 상태에서 새 행동이 들어오면 현재 커서 뒤쪽 스냅샷과 사용 기록을 잘라냅니다.
 
 ## 복원 흐름
+
+`UndoRedoManager`는 복원 직전에 현재 상태의 롤백 스냅샷을 만든 뒤 `CombatSnapshot.Restore`를 실행합니다. 대상 복원이나 검증이 실패하면 롤백 스냅샷으로 복구합니다.
 
 `CombatSnapshot.Restore`는 다음 순서로 복원합니다.
 
@@ -50,7 +52,7 @@ FloorRestartService
 3. 런 상태와 모델 필드를 복원합니다.
 4. 전투 필드, 플레이어 상태, 카드 더미, 포션, 유물, 오브를 복원합니다.
 5. 전투 히스토리와 런 히스토리를 복원합니다.
-6. 카드 런타임 상태와 유물 활성 표시 상태를 정리합니다.
+6. 카드 UI 갱신 신호를 보내고 유물 활성 표시 상태를 정리합니다.
 7. UI를 갱신하고 스냅샷 검증을 실행합니다.
 
 복원은 게임의 공식 save/load와 다르게 현재 객체를 최대한 재사용합니다. 그래서 Godot 노드, Spine 애니메이션, 카드 플레이 노드, 포션 슬롯, 유물 홀더 같은 UI 상태를 별도로 정리합니다.

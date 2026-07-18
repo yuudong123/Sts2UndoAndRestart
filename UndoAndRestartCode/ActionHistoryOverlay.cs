@@ -65,7 +65,6 @@ internal static class ActionHistoryOverlay
             MouseFilter = Control.MouseFilterEnum.Stop,
         };
         ApplyTabStyle(_tabButton);
-        ApplyGameFont(_tabButton, FontType.Bold);
         _tabButton.Pressed += Toggle;
 
         _panel = new PanelContainer
@@ -162,6 +161,10 @@ internal static class ActionHistoryOverlay
         _tabButton.Visible = true;
         _panel.Visible = _isOpen;
         _tabButton.Text = _isOpen ? UndoText.Close : UndoText.ActionHistory;
+        if (!_isOpen)
+        {
+            return;
+        }
 
         foreach (Node child in _content.GetChildren().ToList())
         {
@@ -172,7 +175,10 @@ internal static class ActionHistoryOverlay
         IReadOnlyList<ActionHistoryEntry> entries = UndoRedoManager.GetActionEntries();
         int cursor = UndoRedoManager.CurrentSnapshotIndex;
         _content.AddChild(CreateHeader(entries, cursor));
-        _content.AddChild(CreateInitialStateRow(cursor));
+        if (UndoRedoManager.SnapshotCount > 0)
+        {
+            _content.AddChild(CreateInitialStateRow(cursor));
+        }
 
         if (entries.Count == 0)
         {
@@ -525,8 +531,10 @@ internal static class ActionHistoryOverlay
             return;
         }
 
-        FloorRestartService.HandleQuickRestartKey();
-        NGame.Instance?.GetViewport()?.SetInputAsHandled();
+        if (FloorRestartService.HandleQuickRestartKey())
+        {
+            NGame.Instance?.GetViewport()?.SetInputAsHandled();
+        }
     }
 
     private static void SetTileHover(Control tile, bool isHovered)
@@ -621,14 +629,7 @@ internal static class ActionHistoryOverlay
 
     private static string GetKindText(ActionHistoryEntryKind kind)
     {
-        return kind switch
-        {
-            ActionHistoryEntryKind.Card => UndoText.Kind(kind),
-            ActionHistoryEntryKind.Potion => UndoText.Kind(kind),
-            ActionHistoryEntryKind.DiscardPotion => UndoText.Kind(kind),
-            ActionHistoryEntryKind.TurnTransition => UndoText.Kind(kind),
-            _ => UndoText.Kind(kind),
-        };
+        return UndoText.Kind(kind);
     }
 
     private static Color GetKindColor(ActionHistoryEntryKind kind)
