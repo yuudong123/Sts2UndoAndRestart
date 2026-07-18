@@ -25,8 +25,6 @@ This mod is distributed with `affects_gameplay=false`. Players should still be a
 - STS2 0.109 snapshot audit: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
 - Architecture notes: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
 - C# file specification: [docs/CS_FILE_SPEC.en.md](docs/CS_FILE_SPEC.en.md)
-- English architecture notes: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
-- English C# file specification: [docs/CS_FILE_SPEC.en.md](docs/CS_FILE_SPEC.en.md)
 
 ### Build Requirements
 
@@ -106,8 +104,6 @@ The broad refactoring pass, code specifications, and README were drafted with Co
 ### 문서
 
 - STS2 0.109 스냅샷 감사: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
-- 구조 명세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- C# 파일 명세: [docs/CS_FILE_SPEC.md](docs/CS_FILE_SPEC.md)
 - 한국어 구조 명세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 한국어 C# 파일 명세: [docs/CS_FILE_SPEC.md](docs/CS_FILE_SPEC.md)
 
