@@ -339,7 +339,7 @@ internal static class CardChoiceCheckpointService
 
         GameAction replayAction = replayPoint.Sequence.CreateReplayAction();
         _replayAction = replayAction;
-        replayAction.AfterFinished += FinishReplay;
+        replayAction.AfterFinished += OnReplayActionFinished;
         replayAction.BeforeCancelled += FinishReplay;
 
         try
@@ -352,6 +352,20 @@ internal static class CardChoiceCheckpointService
         {
             FinishReplay(replayAction);
             throw;
+        }
+    }
+
+    private static void OnReplayActionFinished(GameAction action)
+    {
+        CardChoiceReplayPoint? replayPoint = _activeReplay?.ReplayPoint;
+        Exception? replayException = action.Exception;
+        FinishReplay(action);
+
+        if (replayPoint != null && replayException != null)
+        {
+            UndoRedoManager.ScheduleFailedCardChoiceReplayRecovery(
+                replayPoint,
+                replayException);
         }
     }
 
@@ -881,6 +895,7 @@ internal sealed class ReplayCardSelector : MegaCrit.Sts2.Core.TestSupport.ICardS
     }
 
     public bool IsInterruptionRequested => _interruptionCompletionSource.Task.IsCompleted;
+    public CardChoiceReplayPoint ReplayPoint => _target;
 
     public void RequestInterruption()
     {
@@ -948,7 +963,7 @@ internal sealed class ReplayCardSelector : MegaCrit.Sts2.Core.TestSupport.ICardS
             _branched = true;
         }
 
-        record.SetSelectedCards(selectedCards);
+        record.SetSelectedCards(selectedCards, availableCards);
         if (record.Checkpoint != null)
         {
             UndoRedoManager.RecordCardChoice(
@@ -1303,7 +1318,8 @@ internal sealed record HookChoiceRecording(
 
 internal sealed class CardChoiceRecord
 {
-    private IReadOnlyList<CardModel> _selectedCards = Array.Empty<CardModel>();
+    private IReadOnlyList<CardChoiceSelectionIdentity> _selectedCards =
+        Array.Empty<CardChoiceSelectionIdentity>();
 
     public CardChoiceRecord(
         CardChoiceReplaySequence sequence,
@@ -1325,27 +1341,122 @@ internal sealed class CardChoiceRecord
         ContextSource ??
         ReplayPoint.Sequence.FallbackSourceModel;
 
-    public void SetSelectedCards(IReadOnlyList<CardModel> selectedCards)
+    public void SetSelectedCards(
+        IReadOnlyList<CardModel> selectedCards,
+        IReadOnlyList<CardModel>? currentAvailableCards = null)
     {
-        _selectedCards = selectedCards.ToList();
+        IReadOnlyList<CardModel> originalAvailableCards =
+            currentAvailableCards ??
+            Request.AvailableCards ??
+            Array.Empty<CardModel>();
+        HashSet<int> usedIndices = new();
+        _selectedCards = selectedCards
+            .Select(card => new CardChoiceSelectionIdentity(
+                card,
+                FindCardIndexByReference(
+                    originalAvailableCards,
+                    card,
+                    usedIndices),
+                card.Id.Entry,
+                card.IsUpgraded))
+            .ToList();
+        Request.ReleaseAvailableCards();
     }
 
     public IReadOnlyList<CardModel> ResolveSelectedCards(IReadOnlyList<CardModel> availableCards)
     {
         List<CardModel> resolved = new();
-        foreach (CardModel selectedCard in _selectedCards)
+        HashSet<int> usedIndices = new();
+        foreach (CardChoiceSelectionIdentity selectedCard in _selectedCards)
         {
-            CardModel? match = availableCards.FirstOrDefault(card => ReferenceEquals(card, selectedCard));
-            if (match == null)
+            int matchIndex = FindCardIndexByReference(
+                availableCards,
+                selectedCard.OriginalCard,
+                usedIndices);
+            if (matchIndex < 0 &&
+                selectedCard.OriginalOptionIndex >= 0 &&
+                selectedCard.OriginalOptionIndex < availableCards.Count &&
+                !usedIndices.Contains(selectedCard.OriginalOptionIndex) &&
+                selectedCard.Matches(availableCards[selectedCard.OriginalOptionIndex]))
             {
-                throw new InvalidOperationException(
-                    $"Previously selected card {selectedCard.Id.Entry} is unavailable during replay.");
+                matchIndex = selectedCard.OriginalOptionIndex;
+                usedIndices.Add(matchIndex);
             }
 
-            resolved.Add(match);
+            if (matchIndex < 0)
+            {
+                matchIndex = FindCardIndexByIdentity(
+                    availableCards,
+                    selectedCard,
+                    usedIndices);
+            }
+
+            if (matchIndex < 0)
+            {
+                string availableCardIds = string.Join(
+                    ", ",
+                    availableCards.Select(card =>
+                        $"{card.Id.Entry}{(card.IsUpgraded ? "+" : string.Empty)}"));
+                throw new InvalidOperationException(
+                    $"Previously selected card {selectedCard.DisplayName} is unavailable during replay. " +
+                    $"Available cards: [{availableCardIds}].");
+            }
+
+            resolved.Add(availableCards[matchIndex]);
         }
 
         return resolved;
+    }
+
+    private static int FindCardIndexByReference(
+        IReadOnlyList<CardModel> cards,
+        CardModel selectedCard,
+        ISet<int> usedIndices)
+    {
+        for (int index = 0; index < cards.Count; index++)
+        {
+            if (!usedIndices.Contains(index) &&
+                ReferenceEquals(cards[index], selectedCard))
+            {
+                usedIndices.Add(index);
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindCardIndexByIdentity(
+        IReadOnlyList<CardModel> cards,
+        CardChoiceSelectionIdentity selectedCard,
+        ISet<int> usedIndices)
+    {
+        for (int index = 0; index < cards.Count; index++)
+        {
+            if (!usedIndices.Contains(index) &&
+                selectedCard.Matches(cards[index]))
+            {
+                usedIndices.Add(index);
+                return index;
+            }
+        }
+
+        return -1;
+    }
+}
+
+internal sealed record CardChoiceSelectionIdentity(
+    CardModel OriginalCard,
+    int OriginalOptionIndex,
+    string CardId,
+    bool IsUpgraded)
+{
+    public string DisplayName => $"{CardId}{(IsUpgraded ? "+" : string.Empty)}";
+
+    public bool Matches(CardModel card)
+    {
+        return card.Id.Entry == CardId &&
+               card.IsUpgraded == IsUpgraded;
     }
 }
 
@@ -1371,7 +1482,7 @@ internal sealed class CardChoiceRequest
         AbstractModel? source = null,
         CardPile? pile = null,
         bool canSkip = false,
-        int? availableCardCount = null,
+        IReadOnlyList<CardModel>? availableCards = null,
         bool alwaysRequiresPlayerChoice = false)
     {
         Presentation = presentation;
@@ -1380,7 +1491,8 @@ internal sealed class CardChoiceRequest
         Source = source;
         Pile = pile;
         CanSkip = canSkip;
-        AvailableCardCount = availableCardCount;
+        AvailableCards = availableCards?.ToList();
+        AvailableCardCount = availableCards?.Count;
         AlwaysRequiresPlayerChoice = alwaysRequiresPlayerChoice;
     }
 
@@ -1390,6 +1502,7 @@ internal sealed class CardChoiceRequest
     public AbstractModel? Source { get; }
     public CardPile? Pile { get; }
     public bool CanSkip { get; }
+    public IReadOnlyList<CardModel>? AvailableCards { get; private set; }
     public int? AvailableCardCount { get; }
     public bool AlwaysRequiresPlayerChoice { get; }
     public bool RequiresPlayerChoice =>
@@ -1397,6 +1510,11 @@ internal sealed class CardChoiceRequest
         AvailableCardCount is not int count ||
         count > 0 &&
         (Prefs.RequireManualConfirmation || count > Prefs.MinSelect);
+
+    public void ReleaseAvailableCards()
+    {
+        AvailableCards = null;
+    }
 
     public static CardChoiceRequest ForGenericGrid(int minSelect, int maxSelect)
     {
@@ -1407,38 +1525,38 @@ internal sealed class CardChoiceRequest
 
     public static CardChoiceRequest ForSimpleGrid(
         CardSelectorPrefs prefs,
-        int availableCardCount)
+        IReadOnlyList<CardModel> availableCards)
     {
         return new CardChoiceRequest(
             CardChoicePresentation.GenericGrid,
             prefs,
-            availableCardCount: availableCardCount);
+            availableCards: availableCards);
     }
 
     public static CardChoiceRequest ForHand(
         CardSelectorPrefs prefs,
         Func<CardModel, bool>? filter,
         AbstractModel source,
-        int availableCardCount)
+        IReadOnlyList<CardModel> availableCards)
     {
         return new CardChoiceRequest(
             CardChoicePresentation.Hand,
             prefs,
             filter,
             source,
-            availableCardCount: availableCardCount);
+            availableCards: availableCards);
     }
 
     public static CardChoiceRequest ForHandUpgrade(
         AbstractModel source,
-        int availableCardCount)
+        IReadOnlyList<CardModel> availableCards)
     {
         return new CardChoiceRequest(
             CardChoicePresentation.HandUpgrade,
             new CardSelectorPrefs(CardSelectorPrefs.UpgradeSelectionPrompt, 1),
             card => card.IsUpgradable,
             source,
-            availableCardCount: availableCardCount);
+            availableCards: availableCards);
     }
 
     public static CardChoiceRequest ForCombatPile(
@@ -1446,22 +1564,26 @@ internal sealed class CardChoiceRequest
         CardSelectorPrefs prefs,
         Func<CardModel, bool>? filter)
     {
+        IReadOnlyList<CardModel> availableCards = filter == null
+            ? pile.Cards.ToList()
+            : pile.Cards.Where(filter).ToList();
         return new CardChoiceRequest(
             CardChoicePresentation.CombatPile,
             prefs,
             filter,
             pile: pile,
-            availableCardCount: filter == null
-                ? pile.Cards.Count
-                : pile.Cards.Count(filter));
+            availableCards: availableCards);
     }
 
-    public static CardChoiceRequest ForChooseCard(bool canSkip)
+    public static CardChoiceRequest ForChooseCard(
+        IReadOnlyList<CardModel> availableCards,
+        bool canSkip)
     {
         return new CardChoiceRequest(
             CardChoicePresentation.ChooseCard,
             new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, canSkip ? 0 : 1, 1),
             canSkip: canSkip,
+            availableCards: availableCards,
             alwaysRequiresPlayerChoice: true);
     }
 

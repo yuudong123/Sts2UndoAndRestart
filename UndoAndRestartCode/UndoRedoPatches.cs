@@ -315,10 +315,12 @@ internal static class UndoRedoPatches
             typeof(bool),
         })]
     [HarmonyPrefix]
-    private static void BeforeChooseACardScreen(bool canSkip)
+    private static void BeforeChooseACardScreen(
+        IReadOnlyList<CardModel> cards,
+        bool canSkip)
     {
         CardChoiceCheckpointService.PrepareChoiceRequest(
-            CardChoiceRequest.ForChooseCard(canSkip));
+            CardChoiceRequest.ForChooseCard(cards, canSkip));
     }
 
     [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromSimpleGrid),
@@ -335,7 +337,7 @@ internal static class UndoRedoPatches
         CardSelectorPrefs prefs)
     {
         CardChoiceCheckpointService.PrepareChoiceRequest(
-            CardChoiceRequest.ForSimpleGrid(prefs, cardsIn.Count));
+            CardChoiceRequest.ForSimpleGrid(prefs, cardsIn));
     }
 
     [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromSimpleGridForRewards),
@@ -352,7 +354,9 @@ internal static class UndoRedoPatches
         CardSelectorPrefs prefs)
     {
         CardChoiceCheckpointService.PrepareChoiceRequest(
-            CardChoiceRequest.ForSimpleGrid(prefs, cards.Count));
+            CardChoiceRequest.ForSimpleGrid(
+                prefs,
+                cards.Select(card => card.Card).ToList()));
     }
 
     [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromCombatPile),
@@ -390,16 +394,17 @@ internal static class UndoRedoPatches
         Func<CardModel, bool>? filter,
         AbstractModel source)
     {
-        int availableCardCount = PileType.Hand
+        IReadOnlyList<CardModel> availableCards = PileType.Hand
             .GetPile(player)
             .Cards
-            .Count(filter ?? (_ => true));
+            .Where(filter ?? (_ => true))
+            .ToList();
         CardChoiceCheckpointService.PrepareChoiceRequest(
             CardChoiceRequest.ForHand(
                 prefs,
                 filter,
                 source,
-                availableCardCount));
+                availableCards));
     }
 
     [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromHandForUpgrade),
@@ -414,12 +419,13 @@ internal static class UndoRedoPatches
         Player player,
         AbstractModel source)
     {
-        int availableCardCount = PileType.Hand
+        IReadOnlyList<CardModel> availableCards = PileType.Hand
             .GetPile(player)
             .Cards
-            .Count(card => card.IsUpgradable);
+            .Where(card => card.IsUpgradable)
+            .ToList();
         CardChoiceCheckpointService.PrepareChoiceRequest(
-            CardChoiceRequest.ForHandUpgrade(source, availableCardCount));
+            CardChoiceRequest.ForHandUpgrade(source, availableCards));
     }
 
     [HarmonyPatch(typeof(GameActionPlayerChoiceContext), nameof(GameActionPlayerChoiceContext.SignalPlayerChoiceBegun))]

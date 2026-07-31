@@ -2,6 +2,7 @@ using Godot;
 using System.Collections;
 using System.Diagnostics;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Actions;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
@@ -147,6 +148,13 @@ internal static class UndoRedoManager
             return;
         }
 
+        if (action.State == GameActionState.Canceled || action.Exception != null)
+        {
+            MainFile.Logger.Warn(
+                $"Skipped failed action boundary: {action.GetType().Name}.");
+            return;
+        }
+
         if (action is not PlayCardAction &&
             action is not UsePotionAction &&
             action is not DiscardPotionGameAction)
@@ -172,6 +180,114 @@ internal static class UndoRedoManager
         }
 
         ActionHistoryOverlay.Refresh();
+    }
+
+    public static void ScheduleFailedCardChoiceReplayRecovery(
+        CardChoiceReplayPoint replayPoint,
+        Exception replayException)
+    {
+        MainFile.Logger.Error(
+            $"Card choice replay failed; scheduling rollback to its base snapshot: {replayException}");
+        TaskHelper.RunSafely(
+            RecoverFailedCardChoiceReplayAsync(replayPoint));
+    }
+
+    private static async Task RecoverFailedCardChoiceReplayAsync(
+        CardChoiceReplayPoint replayPoint)
+    {
+        ActionExecutor actionExecutor = RunManager.Instance.ActionExecutor;
+        for (int frame = 0;
+             frame < 60 && actionExecutor.CurrentlyRunningAction != null;
+             frame++)
+        {
+            if (Engine.GetMainLoop() is SceneTree sceneTree)
+            {
+                await sceneTree.ToSignal(
+                    sceneTree,
+                    SceneTree.SignalName.ProcessFrame);
+            }
+            else
+            {
+                await Task.Delay(16);
+            }
+        }
+
+        if (actionExecutor.CurrentlyRunningAction != null)
+        {
+            MainFile.Logger.Error(
+                "Could not recover the failed card choice replay because its action did not settle.");
+            return;
+        }
+
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (state == null ||
+            !CombatManager.Instance.IsInProgress ||
+            !ReferenceEquals(_sessionState, state))
+        {
+            MainFile.Logger.Warn(
+                "Skipped failed card choice replay recovery because the combat changed.");
+            return;
+        }
+
+        int firstChoiceIndex = Checkpoints.FindIndex(checkpoint =>
+            ReferenceEquals(
+                checkpoint.CardChoice?.Sequence,
+                replayPoint.Sequence));
+        if (firstChoiceIndex < 0)
+        {
+            MainFile.Logger.Warn(
+                "Skipped failed card choice replay recovery because its timeline no longer exists.");
+            return;
+        }
+
+        CombatSnapshot replayBaseSnapshot = Checkpoints[firstChoiceIndex].Snapshot;
+        bool previousCheckpointUsesReplayBase =
+            firstChoiceIndex > 0 &&
+            ReferenceEquals(
+                Checkpoints[firstChoiceIndex - 1].Snapshot,
+                replayBaseSnapshot);
+
+        _isRestoring = true;
+        _readyCaptureRequestId++;
+        _forceNextPlayerControlReadySnapshot = false;
+        try
+        {
+            replayBaseSnapshot.Restore(validate: false);
+            SnapshotValidator.ValidatePlayableState(state);
+
+            Checkpoints.RemoveRange(
+                firstChoiceIndex,
+                Checkpoints.Count - firstChoiceIndex);
+            ActionEntries.RemoveAll(entry =>
+                entry.SnapshotIndex >= firstChoiceIndex);
+            PendingEntries.Clear();
+            _pendingTurnStartTurnNumber = null;
+
+            if (previousCheckpointUsesReplayBase)
+            {
+                _cursor = firstChoiceIndex - 1;
+            }
+            else
+            {
+                Checkpoints.Add(UndoCheckpoint.ForSnapshot(replayBaseSnapshot));
+                _cursor = Checkpoints.Count - 1;
+            }
+
+            CardChoiceCheckpointService.Reset();
+            TrimActionEntriesToSnapshots();
+            ActionHistoryOverlay.Refresh();
+            MainFile.Logger.Warn(
+                "Recovered the state before the failed card choice replay and removed its invalid timeline.");
+        }
+        catch (Exception recoveryException)
+        {
+            MainFile.Logger.Error(
+                $"Failed to recover the card choice replay base snapshot: {recoveryException}");
+        }
+        finally
+        {
+            _isRestoring = false;
+        }
     }
 
     public static void CapturePlayerControlReady()
