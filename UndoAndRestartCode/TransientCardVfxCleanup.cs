@@ -1,5 +1,7 @@
 using Godot;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Cards;
@@ -14,14 +16,45 @@ internal static class TransientCardVfxCleanup
         ClearContainer(room?.Ui?.CardPreviewContainer);
         ClearContainer(room?.Ui?.MessyCardPreviewContainer);
         ClearCardVfx(room?.Ui);
-        ClearCardVfx(room?.CombatVfxContainer);
+        ClearTransientCardVfxContainer(room?.CombatVfxContainer);
+        ClearTransientCardVfxContainer(room?.BackCombatVfxContainer);
 
         if (NRun.Instance?.GlobalUi != null)
         {
             ClearContainer(NRun.Instance.GlobalUi.CardPreviewContainer);
             ClearContainer(NRun.Instance.GlobalUi.MessyCardPreviewContainer);
-            ClearCardVfx(NRun.Instance.GlobalUi.AboveTopBarVfxContainer);
-            ClearCardVfx(NRun.Instance.GlobalUi.TopBar?.TrailContainer);
+            ClearTransientCardVfxContainer(NRun.Instance.GlobalUi.AboveTopBarVfxContainer);
+            ClearTransientCardVfxContainer(NRun.Instance.GlobalUi.TopBar?.TrailContainer);
+        }
+    }
+
+    private static void ClearTransientCardVfxContainer(Node? container)
+    {
+        if (container == null || !GodotObject.IsInstanceValid(container))
+        {
+            return;
+        }
+
+        List<NCard> transientCards = new();
+        CollectCardNodes(container, transientCards);
+        ClearCardVfx(container);
+
+        foreach (NCard card in transientCards)
+        {
+            RemoveCardImmediately(card);
+        }
+    }
+
+    private static void CollectCardNodes(Node root, ICollection<NCard> cards)
+    {
+        foreach (Node child in root.GetChildren())
+        {
+            if (child is NCard card)
+            {
+                cards.Add(card);
+            }
+
+            CollectCardNodes(child, cards);
         }
     }
 
@@ -80,12 +113,24 @@ internal static class TransientCardVfxCleanup
 
     private static void RemoveImmediately(Node node)
     {
-        if (!GodotObject.IsInstanceValid(node))
+        if (!GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion())
         {
             return;
         }
 
         node.GetParent()?.RemoveChild(node);
         node.QueueFree();
+    }
+
+    private static void RemoveCardImmediately(NCard card)
+    {
+        if (!GodotObject.IsInstanceValid(card) || card.IsQueuedForDeletion())
+        {
+            return;
+        }
+
+        card.PlayPileTween?.Kill();
+        card.PlayPileTween = null;
+        card.QueueFreeSafely();
     }
 }

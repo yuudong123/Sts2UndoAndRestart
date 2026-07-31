@@ -1,96 +1,183 @@
+using System.Globalization;
+using System.Reflection;
+using System.Text.Json;
+using HarmonyLib;
 using MegaCrit.Sts2.Core.Localization;
 
 namespace UndoAndRestartCode;
 
 internal static class UndoText
 {
-    public static bool IsKorean => string.Equals(LocManager.Instance?.Language, "kor", StringComparison.OrdinalIgnoreCase);
-    public static bool IsSimplifiedChinese => string.Equals(LocManager.Instance?.Language, "zhs", StringComparison.OrdinalIgnoreCase);
+    private const string EnglishLanguage = "eng";
+    private static readonly Dictionary<string, string> EnglishTexts = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> CurrentTexts = new(StringComparer.Ordinal);
+    private static string? _loadedLanguage;
 
-    public static string Pick(string korean, string english)
+    public static string ActionHistory => Get("action_history");
+    public static string Close => Get("close");
+    public static string SnapshotLimitTitle => Get("snapshots_to_keep");
+    public static string LimitRangeText => Get("no_minimum");
+    public static string SnapshotLimitHint => Format("snapshot_limit_hint", LimitRangeText);
+    public static string SnapshotLimitWarning => Get("snapshot_limit_warning");
+    public static string ShowHistoryTab => Get("show_history_tab");
+    public static string IncludeCardChoiceSnapshots => Get("include_card_choice_snapshots");
+    public static string Save => Get("save");
+    public static string SaveFailed => Get("save_failed");
+    public static string NumberOnly => Get("number_only");
+    public static string InputUndo => Get("input_undo");
+    public static string InputRedo => Get("input_redo");
+    public static string InputRestart => Get("input_restart");
+    public static string TurnStart => Get("turn_start");
+    public static string NoTarget => Get("no_target");
+    public static string RestartCombat => Get("restart_combat");
+    public static string RestartCombatTooltip => Get("restart_combat_tooltip");
+    public static string InitialStateTooltip => Get("initial_state_tooltip");
+    public static string Redo => Get("redo");
+    public static string CardChoice => Get("card_choice");
+    public static string NoCardSelected => Get("no_card_selected");
+    public static string FeatureAnnouncementTitle => Get("feature_announcement_title");
+    public static string FeatureAnnouncementBody => Get("feature_announcement_body");
+    public static string FeatureAnnouncementConfirm => Get("feature_announcement_confirm");
+
+    public static string Turn(int turnNumber)
     {
-        return IsKorean ? korean : english;
+        return Format("turn", Math.Max(1, turnNumber));
     }
 
-    public static string Pick(string korean, string english, string simplifiedChinese)
+    public static string DiscardSlot(uint slotIndex)
     {
-        if (IsKorean)
-        {
-            return korean;
-        }
-
-        return IsSimplifiedChinese ? simplifiedChinese : english;
+        return Format("discard_slot", slotIndex + 1);
     }
-
-    public static string ActionHistory => Pick("사용 기록", "Action History");
-
-    public static string Close => Pick("닫기", "Close");
-
-    public static string SnapshotLimitTitle => Pick("스냅샷 최대 개수", "Maximum Snapshots");
-
-    public static string LimitRangeText => Pick("최소값 없음", "No minimum");
-
-    public static string SnapshotLimitHint => Pick(
-        $"범위: {LimitRangeText}. 저장 후 다음 스냅샷부터 적용.",
-        $"Range: {LimitRangeText}. Applies to new snapshots after saving.");
-
-    public static string SnapshotLimitWarning => Pick(
-        "경고: 수치를 너무 크게 잡으면 긴 전투에서 메모리 사용량과 UI 갱신 비용이 커질 수 있음.",
-        "Warning: very high values can increase memory usage and UI refresh cost in long combats.");
-
-    public static string ShowHistoryTab => Pick("우상단 사용 기록 탭 표시", "Show top-right action history tab");
-
-    public static string Save => Pick("저장", "Save");
-
-    public static string Saved(int value) => Pick($"저장됨: {value}", $"Saved: {value}");
-
-    public static string NumberOnly => Pick("숫자만 입력해줘.", "Enter numbers only.");
-
-    public static string InputUndo => Pick("되돌리기", "Undo");
-
-    public static string InputRedo => Pick("다시실행", "Redo");
-
-    public static string InputRestart => Pick("층 다시 시작", "Restart Floor");
-
-    public static string NextTurnStart => Pick("다음 턴 시작", "Next Turn Start");
-
-    public static string Turn(int turnNumber) => Pick($"턴 {Math.Max(1, turnNumber)}", $"Turn {Math.Max(1, turnNumber)}");
-
-    public static string NoTarget => Pick("대상 없음", "No Target");
-
-    public static string DiscardSlot(uint slotIndex) => Pick($"{slotIndex + 1}번 슬롯 버림", $"Discard slot {slotIndex + 1}");
-
-    public static string RestartCombat => Pick("전투 다시 시작 (F5)", "Restart Combat (F5)", "重新开始战斗 (F5)");
-
-    public static string RestartCombatTooltip => Pick(
-        "현재 전투/방을 F5처럼 처음부터 다시 시작",
-        "Restart the current combat/room from the beginning, like pressing F5.",
-        "像按 F5 一样，从头重新开始当前战斗/房间。");
 
     public static string InitialState(bool current)
     {
         return current
-            ? Pick("> 처음 상태 <", "> Initial State <")
-            : Pick("처음 상태로 돌아가기 (기록 보존)", "Return to Initial State (Keep History)");
+            ? Get("initial_state_current")
+            : Get("initial_state");
     }
 
-    public static string InitialStateTooltip => Pick(
-        "아무것도 사용하기 전의 처음 상태로 돌아감",
-        "Return to the initial state before any action was used.");
-
-    public static string Snapshot(int snapshotIndex) => Pick($"스냅샷 {snapshotIndex + 1}", $"Snapshot {snapshotIndex + 1}");
-
-    public static string Redo => Pick("재실행", "Redo");
+    public static string Snapshot(int snapshotIndex)
+    {
+        return Format("snapshot", snapshotIndex + 1);
+    }
 
     public static string Kind(ActionHistoryEntryKind kind)
     {
         return kind switch
         {
-            ActionHistoryEntryKind.Card => Pick("카드", "Card"),
-            ActionHistoryEntryKind.Potion => Pick("물약", "Potion"),
-            ActionHistoryEntryKind.DiscardPotion => Pick("버림", "Discard"),
-            ActionHistoryEntryKind.TurnTransition => Pick("턴", "Turn"),
-            _ => Pick("행동", "Action"),
+            ActionHistoryEntryKind.Card => Get("kind_card"),
+            ActionHistoryEntryKind.CardChoice => CardChoice,
+            ActionHistoryEntryKind.Potion => Get("kind_potion"),
+            ActionHistoryEntryKind.DiscardPotion => Get("kind_discard"),
+            ActionHistoryEntryKind.TurnStart => Get("kind_turn"),
+            _ => Get("kind_action"),
         };
+    }
+
+    public static void Reload(string? language = null)
+    {
+        string resolvedLanguage = language ??
+                                  LocManager.Instance?.Language ??
+                                  EnglishLanguage;
+        EnglishTexts.Clear();
+        CurrentTexts.Clear();
+        LoadLanguageFile(EnglishLanguage, EnglishTexts, required: true);
+        if (!string.Equals(resolvedLanguage, EnglishLanguage, StringComparison.OrdinalIgnoreCase))
+        {
+            LoadLanguageFile(resolvedLanguage, CurrentTexts, required: false);
+        }
+
+        _loadedLanguage = resolvedLanguage;
+        MainFile.Logger.Info(
+            $"Loaded undo UI language '{resolvedLanguage}' with {CurrentTexts.Count} localized entries.");
+    }
+
+    private static string Get(string key)
+    {
+        EnsureLoaded();
+        if (CurrentTexts.TryGetValue(key, out string? localized))
+        {
+            return localized;
+        }
+
+        if (EnglishTexts.TryGetValue(key, out string? english))
+        {
+            return english;
+        }
+
+        MainFile.Logger.Warn($"Missing undo UI localization key: {key}");
+        return key;
+    }
+
+    private static string Format(string key, params object[] args)
+    {
+        return string.Format(CultureInfo.CurrentCulture, Get(key), args);
+    }
+
+    private static void EnsureLoaded()
+    {
+        string language = LocManager.Instance?.Language ?? EnglishLanguage;
+        if (!string.Equals(_loadedLanguage, language, StringComparison.OrdinalIgnoreCase))
+        {
+            Reload(language);
+        }
+    }
+
+    private static void LoadLanguageFile(
+        string language,
+        Dictionary<string, string> destination,
+        bool required)
+    {
+        string path = Path.Combine(GetLanguageDirectory(), $"{language}.json");
+        if (!File.Exists(path))
+        {
+            if (required)
+            {
+                MainFile.Logger.Error($"Required undo UI language file is missing: {path}");
+            }
+            else
+            {
+                MainFile.Logger.Info(
+                    $"Undo UI language file '{language}.json' was not found; using English fallback.");
+            }
+
+            return;
+        }
+
+        try
+        {
+            Dictionary<string, string>? loaded =
+                JsonSerializer.Deserialize<Dictionary<string, string>>(
+                    File.ReadAllText(path));
+            if (loaded == null)
+            {
+                return;
+            }
+
+            foreach ((string key, string value) in loaded)
+            {
+                destination[key] = value;
+            }
+        }
+        catch (Exception ex)
+        {
+            MainFile.Logger.Error($"Failed to load undo UI language file {path}: {ex}");
+        }
+    }
+
+    private static string GetLanguageDirectory()
+    {
+        string assemblyPath = Assembly.GetExecutingAssembly().Location;
+        return Path.Combine(Path.GetDirectoryName(assemblyPath)!, "language");
+    }
+}
+
+[HarmonyPatch(typeof(LocManager), nameof(LocManager.SetLanguage))]
+internal static class UndoLocaleChangedPatch
+{
+    private static void Postfix(string language)
+    {
+        UndoText.Reload(language);
+        ActionHistoryOverlay.Refresh();
     }
 }

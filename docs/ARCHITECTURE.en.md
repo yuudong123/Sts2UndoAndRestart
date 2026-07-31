@@ -20,7 +20,11 @@ UndoRedoPatches
 UndoRedoManager
   -> Owns the snapshot stack
   -> Tracks the undo/redo cursor
-  -> Captures snapshots only at stable player-control boundaries
+  -> Captures snapshots at stable player-control and optional card-selection boundaries
+
+CardChoiceCheckpointService
+  -> Captures manual card-selection checkpoints
+  -> Reconstructs selection screens by replaying their originating action
 
 CombatSnapshot
   -> Captures and restores combat, run, card, player, creature, and UI state
@@ -40,6 +44,12 @@ FloorRestartService
 4. Once the game is actually capturable, `CombatSnapshot.Capture` stores the current state.
 5. No partial state fingerprint is used. Actions that only change relic counters or mod-owned internal fields still receive independent snapshots.
 6. If a new action is taken while a redo branch exists, snapshots and action-history entries after the current cursor are removed.
+
+When card-selection checkpoints are enabled, manual selection requests create an
+additional boundary. Automatic one-card resolutions are skipped. Restoring one of
+these checkpoints first restores its pre-action snapshot, then replays only the
+originating action until the requested selection is open. Replay-side captures are
+suppressed so they cannot fork or truncate the existing timeline.
 
 ## Restore Flow
 
@@ -70,6 +80,7 @@ The restore process intentionally reuses live objects instead of using the game'
 ## Settings and Input
 
 - Config path: `OS.GetUserDataDir()/mod_configs/UndoAndRestart.json`
+- The settings screen also controls action-history visibility and optional card-selection checkpoints.
 - Input actions:
   - `undo_and_restart_undo`
   - `undo_and_restart_redo`

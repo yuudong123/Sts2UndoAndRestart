@@ -6,11 +6,13 @@
 
 `Undo And Restart` is a Slay the Spire 2 C# mod that adds undo, redo, floor restart, and an action history tab for combat.
 
-The current source targets STS2 `0.109.0` only. Older game versions must use a matching historical mod release.
+The current source targets STS2 `0.110.0` only. Older game versions must use a matching historical mod release.
 
 Mod versions follow `<game version>.<mod patch number>`. The first release for
-STS2 `0.109.0` is `0.109.0.1`; additional mod-only fixes increment the final
-number. Every Workshop update note must state the supported game version.
+STS2 `0.110.0` is `0.110.0.1`; additional mod-only fixes increment the final
+number. Every Workshop update note must state the supported game version. Before
+publishing an update note, verify the latest public and beta game versions and
+attach direct download links to their matching GitHub releases.
 
 Workshop update notes use this format:
 
@@ -20,6 +22,9 @@ Mod version : x.x.x.x
 
 - Change 1
 - Change 2
+
+For <latest public version> -> <matching GitHub release download URL>
+For <latest beta version> -> <matching GitHub release download URL>
 ```
 
 ### Features
@@ -30,7 +35,9 @@ Mod version : x.x.x.x
 - The three hotkeys can be changed from the game's input settings screen.
 - Used cards and potions can be viewed in a grid-based action history tab during combat.
 - Clicking an item in the action history tab restores the corresponding snapshot.
-- The mod settings screen lets players change the maximum snapshot count and show or hide the action history tab.
+- Card-selection screens can optionally be stored as undo/redo checkpoints. The option is enabled by default.
+- The mod settings screen lets players change the maximum snapshot count, show or hide the action history tab, and enable or disable card-selection checkpoints.
+- User-facing mod text is loaded from separate English, Korean, Japanese, Simplified Chinese, and Traditional Chinese language files.
 
 ### Multiplayer Policy
 
@@ -38,7 +45,8 @@ This mod is distributed with `affects_gameplay=false`. Players should still be a
 
 ### Documentation
 
-- STS2 0.109 snapshot audit: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
+- STS2 0.110 snapshot audit: [SNAPSHOT_AUDIT_0.110.md](SNAPSHOT_AUDIT_0.110.md)
+- Previous STS2 0.109 snapshot audit: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
 - Architecture notes: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
 - C# file specification: [docs/CS_FILE_SPEC.en.md](docs/CS_FILE_SPEC.en.md)
 
@@ -103,12 +111,14 @@ The broad refactoring pass, code specifications, and README were drafted with Co
 
 `Undo And Restart`는 Slay the Spire 2 전투 중 되돌리기, 다시 실행, 층 다시 시작, 사용 기록 탭을 추가하는 C# 모드입니다.
 
-현재 소스는 STS2 `0.109.0`만 지원합니다. 이전 게임 버전에서는 해당 버전에 맞는 과거 모드 릴리스를 사용해야 합니다.
+현재 소스는 STS2 `0.110.0`만 지원합니다. 이전 게임 버전에서는 해당 버전에 맞는 과거 모드 릴리스를 사용해야 합니다.
 
 모드 버전은 `<게임 버전>.<모드 패치 번호>` 형식을 사용합니다. STS2
-`0.109.0`의 첫 배포 버전은 `0.109.0.1`이며, 게임 버전이 그대로인 상태에서
+`0.110.0`의 첫 배포 버전은 `0.110.0.1`이며, 게임 버전이 그대로인 상태에서
 모드만 추가 수정하면 마지막 번호를 1씩 올립니다. 모든 창작마당 업데이트
-노트에는 지원하는 게임 버전을 명시합니다.
+노트에는 지원하는 게임 버전을 명시합니다. 업데이트 노트를 게시하기 전에
+최신 public 및 beta 게임 버전을 확인하고, 각 버전에 맞는 GitHub 릴리스의
+직접 다운로드 링크를 함께 추가합니다.
 
 창작마당 업데이트 노트는 다음 형식을 사용합니다.
 
@@ -118,6 +128,9 @@ Mod version : x.x.x.x
 
 - 변경 내용 1
 - 변경 내용 2
+
+For <최신 public 버전> -> <해당 GitHub 릴리스 다운로드 URL>
+For <최신 beta 버전> -> <해당 GitHub 릴리스 다운로드 URL>
 ```
 
 ### 기능
@@ -128,7 +141,9 @@ Mod version : x.x.x.x
 - 게임의 입력 설정 화면에서 세 기능의 단축키를 직접 변경할 수 있습니다.
 - 전투 중 사용한 카드와 포션을 격자형 사용 기록 탭으로 볼 수 있습니다.
 - 사용 기록 탭에서 특정 항목을 클릭하면 해당 스냅샷으로 이동합니다.
-- 모드 설정에서 최대 스냅샷 수와 사용 기록 탭 표시 여부를 조절할 수 있습니다.
+- 카드 선택창을 선택적으로 undo/redo 체크포인트에 포함할 수 있으며 기본값은 켜짐입니다.
+- 모드 설정에서 최대 스냅샷 수, 사용 기록 탭 표시 여부, 카드 선택창 체크포인트 사용 여부를 조절할 수 있습니다.
+- 사용자에게 표시되는 모드 문구는 영어, 한국어, 일본어, 중국어 간체, 중국어 번체 언어 파일로 분리되어 있습니다.
 
 ### 멀티플레이어 정책
 
@@ -136,7 +151,8 @@ Mod version : x.x.x.x
 
 ### 문서
 
-- STS2 0.109 스냅샷 감사: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
+- STS2 0.110 스냅샷 감사: [SNAPSHOT_AUDIT_0.110.md](SNAPSHOT_AUDIT_0.110.md)
+- 이전 STS2 0.109 스냅샷 감사: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
 - 한국어 구조 명세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 한국어 C# 파일 명세: [docs/CS_FILE_SPEC.md](docs/CS_FILE_SPEC.md)
 

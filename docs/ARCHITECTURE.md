@@ -20,7 +20,11 @@ UndoRedoPatches
 UndoRedoManager
   -> 스냅샷 목록 관리
   -> undo/redo 커서 관리
-  -> 플레이어 조작 가능 시점 캡처
+  -> 플레이어 조작 가능 시점과 선택적 카드 선택 경계 캡처
+
+CardChoiceCheckpointService
+  -> 수동 카드 선택창 체크포인트 캡처
+  -> 원래 액션을 재실행해 선택창 재구성
 
 CombatSnapshot
   -> 전투, 런, 카드, 플레이어, 크리처, UI 상태 캡처/복원
@@ -40,6 +44,12 @@ FloorRestartService
 4. 실제 캡처 가능 조건을 만족하면 `CombatSnapshot.Capture`가 호출됩니다.
 5. 일부 값만 비교하는 fingerprint는 사용하지 않습니다. 유물 스택이나 모드 내부 필드만 바뀐 행동도 독립 스냅샷으로 보존합니다.
 6. redo 브랜치가 남아 있는 상태에서 새 행동이 들어오면 현재 커서 뒤쪽 스냅샷과 사용 기록을 잘라냅니다.
+
+카드 선택창 체크포인트를 켜면 수동 선택 요청도 추가 경계가 됩니다. 카드가
+한 장뿐이라 자동으로 처리되는 선택은 제외합니다. 해당 체크포인트를 복원할
+때는 먼저 액션 전 스냅샷으로 돌아간 뒤, 대상 선택창이 열릴 때까지만 원래
+액션을 재실행합니다. 재실행 중 캡처는 막아서 기존 타임라인이 갈라지거나
+잘리지 않게 합니다.
 
 ## 복원 흐름
 
@@ -70,6 +80,7 @@ FloorRestartService
 ## 설정과 입력
 
 - 설정 파일: `OS.GetUserDataDir()/mod_configs/UndoAndRestart.json`
+- 설정 화면에서 사용 기록 표시와 카드 선택창 체크포인트 사용 여부도 조절합니다.
 - 입력 액션:
   - `undo_and_restart_undo`
   - `undo_and_restart_redo`

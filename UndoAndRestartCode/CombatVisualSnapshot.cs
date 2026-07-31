@@ -1,8 +1,11 @@
+using System.Reflection;
 using Godot;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Forms;
 
 namespace UndoAndRestartCode;
 
@@ -31,7 +34,16 @@ internal sealed class CombatVisualSnapshot
             if (creature.CombatId is uint id &&
                 _creatures.TryGetValue(id, out CreatureVisualState? state))
             {
-                state.Restore(creature);
+                try
+                {
+                    state.Restore(creature);
+                }
+                catch (Exception ex)
+                {
+                    // 선택적 시각 상태 복원 실패가 핵심 전투 상태 복원을 중단시키면 안 됨.
+                    MainFile.Logger.Warn(
+                        $"Failed to restore creature visuals for {creature.LogName}: {ex.Message}");
+                }
             }
         }
     }
@@ -42,8 +54,9 @@ internal sealed class CombatVisualSnapshot
         private readonly TransformState? _body;
         private readonly float? _tempScale;
         private readonly List<AnimationTrackState> _tracks = new();
+        private readonly FormVfxState _formVfx = FormVfxState.Empty;
 
-        private CreatureVisualState(NCreature? node)
+        private CreatureVisualState(NCreature? node, Creature creature)
         {
             if (node == null || !GodotObject.IsInstanceValid(node))
             {
@@ -53,6 +66,7 @@ internal sealed class CombatVisualSnapshot
             _position = node.Position;
             _body = TransformState.Capture(node.Body);
             _tempScale = ReflectionUtil.GetField<float>(node, "_tempScale");
+            _formVfx = FormVfxState.Capture(node, creature);
 
             if (!node.HasSpineAnimation)
             {
@@ -81,7 +95,9 @@ internal sealed class CombatVisualSnapshot
 
         public static CreatureVisualState Capture(Creature creature)
         {
-            return new CreatureVisualState(NCombatRoom.Instance?.GetCreatureNode(creature));
+            return new CreatureVisualState(
+                NCombatRoom.Instance?.GetCreatureNode(creature),
+                creature);
         }
 
         public void Restore(Creature creature)
@@ -105,6 +121,7 @@ internal sealed class CombatVisualSnapshot
             }
 
             NormalizeModelDrivenUi(node, creature);
+            _formVfx.Restore(node, creature);
             RestoreTrackTimesOnly(node, creature);
         }
 
@@ -176,6 +193,102 @@ internal sealed class CombatVisualSnapshot
     }
 
     private sealed record AnimationTrackState(int TrackId, string Name, float Time);
+
+    private sealed class FormVfxState
+    {
+        public static readonly FormVfxState Empty = new(null, null, false);
+
+        private readonly Type? _vfxType;
+        private readonly PowerModel? _power;
+        private readonly bool _isActive;
+
+        private FormVfxState(Type? vfxType, PowerModel? power, bool isActive)
+        {
+            _vfxType = vfxType;
+            _power = power;
+            _isActive = isActive;
+        }
+
+        public static FormVfxState Capture(NCreature node, Creature creature)
+        {
+            Control? holder = ReflectionUtil.GetField<Control>(
+                node.Visuals,
+                "_formVfxHolder");
+            NFormVfx? vfx = holder?.GetChildren().OfType<NFormVfx>().FirstOrDefault();
+            if (vfx == null || !GodotObject.IsInstanceValid(vfx))
+            {
+                return Empty;
+            }
+
+            PowerModel? power = creature.Powers.FirstOrDefault(
+                candidate => ReferenceEquals(
+                    ReflectionUtil.GetField<NFormVfx>(candidate, "_vfx"),
+                    vfx));
+            bool isActive = ReflectionUtil.GetField<bool>(vfx, "_isActive");
+            return new FormVfxState(vfx.GetType(), power, isActive);
+        }
+
+        public void Restore(NCreature node, Creature creature)
+        {
+            Control? holder = ReflectionUtil.GetField<Control>(
+                node.Visuals,
+                "_formVfxHolder");
+            if (holder == null || !GodotObject.IsInstanceValid(holder))
+            {
+                return;
+            }
+
+            if (_vfxType == null ||
+                _power == null ||
+                !creature.Powers.Contains(_power))
+            {
+                node.Visuals.RemoveFormVfx();
+                return;
+            }
+
+            NFormVfx? vfx = holder.GetChildren().OfType<NFormVfx>().FirstOrDefault();
+            if (vfx == null || !GodotObject.IsInstanceValid(vfx) || vfx.GetType() != _vfxType)
+            {
+                node.Visuals.RemoveFormVfx();
+                MethodInfo? createMethod = _vfxType.GetMethod(
+                    "Create",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: new[] { typeof(Creature) },
+                    modifiers: null);
+                vfx = createMethod?.Invoke(null, new object[] { creature }) as NFormVfx;
+            }
+
+            if (vfx == null || !GodotObject.IsInstanceValid(vfx))
+            {
+                MainFile.Logger.Warn(
+                    $"Failed to restore form VFX {_vfxType.Name} for {creature.LogName}.");
+                return;
+            }
+
+            ReflectionUtil.SetRequiredField(_power, "_vfx", vfx);
+            vfx.SetActive(_isActive);
+            ForceVisualState(vfx, _isActive);
+        }
+
+        private static void ForceVisualState(NFormVfx vfx, bool isActive)
+        {
+            object? valueRamp = ReflectionUtil.GetField<object>(vfx, "_valueRamp");
+            ReflectionUtil.Method(valueRamp?.GetType() ?? typeof(object), "ForceValue", typeof(float))
+                ?.Invoke(valueRamp, new object[] { isActive ? 1f : 0f });
+
+            foreach (string methodName in new[]
+                     {
+                         "UpdateModulates",
+                         "UpdateVfx",
+                         "UpdateSnakesContainerModulate",
+                     })
+            {
+                ReflectionUtil.Method(vfx.GetType(), methodName, typeof(float))
+                    ?.Invoke(vfx, new object[] { isActive ? 1f : 0f });
+            }
+        }
+    }
 
     private sealed class TransformState
     {

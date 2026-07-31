@@ -19,11 +19,21 @@ internal static class CombatRuntimeStateCleanup
 
     public static void ClearCombatTurnFlags()
     {
-        ReflectionUtil.SetRequiredField(CombatManager.Instance, "_playerToEnemyTransitionFired", false);
-        ReflectionUtil.SetRequiredField(CombatManager.Instance, "_inPlayerTurnSetup", false);
-        ReflectionUtil.SetRequiredField(CombatManager.Instance, "_deferredEndTurnTransition", null);
-        ReflectionUtil.SetRequiredField(CombatManager.Instance, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
-        ReflectionUtil.SetRequiredField(CombatManager.Instance, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
+        object? turnState = GetCurrentTurnState();
+        if (turnState == null)
+        {
+            return;
+        }
+
+        ReflectionUtil.SetRequiredField(turnState, "<PendingLoss>k__BackingField", null);
+        ReflectionUtil.SetRequiredField(turnState, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
+        ReflectionUtil.SetRequiredField(turnState, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
+        ReflectionUtil.GetRequiredField<HashSet<Player>>(
+            turnState,
+            "<PlayersReadyToEndTurn>k__BackingField").Clear();
+        ReflectionUtil.GetRequiredField<HashSet<Player>>(
+            turnState,
+            "<PlayersReadyToBeginEnemyTurn>k__BackingField").Clear();
     }
 
     public static bool TryClearStaleEndingTurnFlagsIfPlayerControlAvailable(CombatState state)
@@ -33,11 +43,49 @@ internal static class CombatRuntimeStateCleanup
             return false;
         }
 
-        ReflectionUtil.SetRequiredField(CombatManager.Instance, "_playerToEnemyTransitionFired", false);
-        ReflectionUtil.SetRequiredField(CombatManager.Instance, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
-        ReflectionUtil.SetRequiredField(CombatManager.Instance, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
+        object? turnState = GetCurrentTurnState(state);
+        if (turnState == null)
+        {
+            return false;
+        }
+
+        ReflectionUtil.SetRequiredField(turnState, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
+        ReflectionUtil.SetRequiredField(turnState, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
         MainFile.Logger.Info("Cleared stale ending-turn flags while player control was available.");
         return true;
+    }
+
+    public static object? GetCurrentTurnState(CombatState? expectedState = null)
+    {
+        object? turnState = ReflectionUtil.GetField<object>(CombatManager.Instance, "_turnState");
+        if (turnState == null)
+        {
+            return null;
+        }
+
+        if (expectedState != null)
+        {
+            CombatState state = ReflectionUtil.GetRequiredField<CombatState>(
+                turnState,
+                "<State>k__BackingField");
+            if (!ReferenceEquals(state, expectedState))
+            {
+                return null;
+            }
+        }
+
+        return turnState;
+    }
+
+    public static void SetEndingPlayerTurnPhaseOne(bool value)
+    {
+        object turnState = GetCurrentTurnState() ??
+                           throw new InvalidOperationException(
+                               "Current combat turn state is unavailable.");
+        ReflectionUtil.SetRequiredField(
+            turnState,
+            "<EndingPlayerTurnPhaseOne>k__BackingField",
+            value);
     }
 
     public static bool TryRecoverStaleRuntimeBlocker(

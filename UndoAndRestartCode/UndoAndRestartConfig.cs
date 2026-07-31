@@ -10,6 +10,8 @@ internal static class UndoAndRestartConfig
 
     public static int SnapshotLimit { get; private set; } = DefaultSnapshotLimit;
     public static bool ShowActionHistoryOverlay { get; private set; } = true;
+    public static bool IncludeCardChoiceSnapshots { get; private set; } = true;
+    public static bool HasAcknowledgedFeatureAnnouncement { get; private set; }
 
     public static void Load()
     {
@@ -23,51 +25,59 @@ internal static class UndoAndRestartConfig
 
             string json = File.ReadAllText(ConfigPath);
             Settings? settings = JsonSerializer.Deserialize<Settings>(json);
-            SetSnapshotLimit(settings?.SnapshotLimit ?? DefaultSnapshotLimit, save: false);
+            SnapshotLimit = Math.Max(0, settings?.SnapshotLimit ?? DefaultSnapshotLimit);
             ShowActionHistoryOverlay = settings?.ShowActionHistoryOverlay ?? true;
+            IncludeCardChoiceSnapshots = settings?.IncludeCardChoiceSnapshots ?? true;
+            HasAcknowledgedFeatureAnnouncement =
+                settings?.HasAcknowledgedFeatureAnnouncement ?? false;
         }
         catch (Exception ex)
         {
             MainFile.Logger.Warn($"Failed to load config, using defaults: {ex.Message}");
             SnapshotLimit = DefaultSnapshotLimit;
             ShowActionHistoryOverlay = true;
+            IncludeCardChoiceSnapshots = true;
+            HasAcknowledgedFeatureAnnouncement = false;
         }
     }
 
-    public static bool TrySetSnapshotLimit(string text, out int value)
+    public static bool SaveSettings(
+        int snapshotLimit,
+        bool showActionHistoryOverlay,
+        bool includeCardChoiceSnapshots)
     {
-        if (!int.TryParse(text, out value))
+        int oldSnapshotLimit = SnapshotLimit;
+        bool oldShowActionHistoryOverlay = ShowActionHistoryOverlay;
+        bool oldIncludeCardChoiceSnapshots = IncludeCardChoiceSnapshots;
+        SnapshotLimit = Math.Max(0, snapshotLimit);
+        ShowActionHistoryOverlay = showActionHistoryOverlay;
+        IncludeCardChoiceSnapshots = includeCardChoiceSnapshots;
+        if (Save())
         {
-            value = SnapshotLimit;
-            return false;
+            return true;
         }
 
-        SetSnapshotLimit(value, save: true);
-        value = SnapshotLimit;
-        return true;
+        SnapshotLimit = oldSnapshotLimit;
+        ShowActionHistoryOverlay = oldShowActionHistoryOverlay;
+        IncludeCardChoiceSnapshots = oldIncludeCardChoiceSnapshots;
+        return false;
     }
 
-    public static void SetSnapshotLimit(int value, bool save)
+    public static bool AcknowledgeFeatureAnnouncement()
     {
-        SnapshotLimit = Math.Max(0, value);
-        if (save)
+        HasAcknowledgedFeatureAnnouncement = true;
+        if (Save())
         {
-            Save();
+            return true;
         }
-    }
 
-    public static void SetShowActionHistoryOverlay(bool value, bool save)
-    {
-        ShowActionHistoryOverlay = value;
-        if (save)
-        {
-            Save();
-        }
+        HasAcknowledgedFeatureAnnouncement = false;
+        return false;
     }
 
     public static string LimitRangeText => UndoText.LimitRangeText;
 
-    private static void Save()
+    private static bool Save()
     {
         try
         {
@@ -76,12 +86,16 @@ internal static class UndoAndRestartConfig
             {
                 SnapshotLimit = SnapshotLimit,
                 ShowActionHistoryOverlay = ShowActionHistoryOverlay,
+                IncludeCardChoiceSnapshots = IncludeCardChoiceSnapshots,
+                HasAcknowledgedFeatureAnnouncement = HasAcknowledgedFeatureAnnouncement,
             }, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(ConfigPath, json);
+            return true;
         }
         catch (Exception ex)
         {
             MainFile.Logger.Warn($"Failed to save config: {ex.Message}");
+            return false;
         }
     }
 
@@ -89,5 +103,7 @@ internal static class UndoAndRestartConfig
     {
         public int SnapshotLimit { get; set; } = DefaultSnapshotLimit;
         public bool ShowActionHistoryOverlay { get; set; } = true;
+        public bool IncludeCardChoiceSnapshots { get; set; } = true;
+        public bool HasAcknowledgedFeatureAnnouncement { get; set; }
     }
 }

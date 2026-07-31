@@ -14,6 +14,18 @@ internal static class SnapshotValidator
 {
     public static void ValidatePlayableState(CombatState state)
     {
+        ValidateRestoredState(state, requirePlayerControl: true);
+    }
+
+    public static void ValidateCardChoiceReplayBaseState(CombatState state)
+    {
+        ValidateRestoredState(state, requirePlayerControl: false);
+    }
+
+    private static void ValidateRestoredState(
+        CombatState state,
+        bool requirePlayerControl)
+    {
         List<string> errors = new();
         HashSet<CardModel> runCards = ReflectionUtil
             .GetRequiredField<List<CardModel>>((RunState)state.RunState, "_allCards")
@@ -87,7 +99,7 @@ internal static class SnapshotValidator
             errors.Add("Card or potion effect depth is non-zero after restore.");
         }
 
-        ValidatePlayerControlState(state, errors);
+        ValidatePlayerControlState(state, errors, requirePlayerControl);
 
         if (errors.Count == 0)
         {
@@ -99,19 +111,23 @@ internal static class SnapshotValidator
         throw new InvalidOperationException(message);
     }
 
-    private static void ValidatePlayerControlState(CombatState state, List<string> errors)
+    private static void ValidatePlayerControlState(
+        CombatState state,
+        List<string> errors,
+        bool requirePlayerControl)
     {
         if (state.CurrentSide != CombatSide.Player)
         {
             return;
         }
 
-        if (CombatManager.Instance.PlayerActionsDisabled)
+        if (requirePlayerControl && CombatManager.Instance.PlayerActionsDisabled)
         {
             errors.Add("Player actions remain disabled after restore.");
         }
 
-        if (state.Players.Any(player => player.PlayerCombatState?.Phase != PlayerTurnPhase.Play))
+        if (requirePlayerControl &&
+            state.Players.Any(player => player.PlayerCombatState?.Phase != PlayerTurnPhase.Play))
         {
             errors.Add("A player is not in the Play phase after restore.");
         }
@@ -190,12 +206,15 @@ internal static class SnapshotValidator
             errors.Add("The selected-card container still contains hand cards after restore.");
         }
 
-        bool canPlayCards =
-            (bool)(ReflectionUtil.Method(typeof(NPlayerHand), "CanPlayCards")!
-                .Invoke(hand, null) ?? false);
-        if (!canPlayCards)
+        if (requirePlayerControl)
         {
-            errors.Add("NPlayerHand.CanPlayCards returned false after restore.");
+            bool canPlayCards =
+                (bool)(ReflectionUtil.Method(typeof(NPlayerHand), "CanPlayCards")!
+                    .Invoke(hand, null) ?? false);
+            if (!canPlayCards)
+            {
+                errors.Add("NPlayerHand.CanPlayCards returned false after restore.");
+            }
         }
     }
 }

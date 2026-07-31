@@ -1,6 +1,7 @@
 using Godot;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 
 namespace UndoAndRestartCode;
@@ -11,21 +12,57 @@ internal static class UndoInputBindings
     public static readonly StringName RedoAction = "undo_and_restart_redo";
     public static readonly StringName RestartAction = "undo_and_restart_restart";
 
-    private static bool _registrationAttempted;
     private static bool _waitingForInputMap;
 
     public static void EnsureRegistered()
     {
-        if (!_registrationAttempted)
+        AddKeyboardAction(UndoAction);
+        AddKeyboardAction(RedoAction);
+        AddKeyboardAction(RestartAction);
+        AddSettingsTitles();
+        EnsureKeyboardEntries();
+    }
+
+    public static void EnsureSettingsPanelEntries(NInputSettingsPanel panel)
+    {
+        EnsureRegistered();
+
+        HashSet<StringName> existingActions = panel.Content
+            .GetChildren()
+            .OfType<NInputSettingsEntry>()
+            .Select(entry => entry.InputName)
+            .ToHashSet();
+
+        int addedCount = 0;
+        foreach (StringName action in GetActions())
         {
-            AddKeyboardAction(UndoAction);
-            AddKeyboardAction(RedoAction);
-            AddKeyboardAction(RestartAction);
-            AddSettingsTitles();
-            _registrationAttempted = true;
+            if (existingActions.Contains(action))
+            {
+                continue;
+            }
+
+            NInputSettingsEntry entry = NInputSettingsEntry.Create(action);
+            entry.Connect(
+                NClickableControl.SignalName.Released,
+                Callable.From<NClickableControl>(_ =>
+                {
+                    ReflectionUtil.Method(
+                            typeof(NInputSettingsPanel),
+                            "SetAsListeningEntry",
+                            typeof(NInputSettingsEntry))
+                        ?.Invoke(panel, new object[] { entry });
+                }));
+            panel.Content.AddChild(entry);
+            addedCount++;
         }
 
-        EnsureKeyboardEntries();
+        if (addedCount > 0)
+        {
+            ReflectionUtil.Method(typeof(NInputSettingsPanel), "UpdateNavigation")
+                ?.Invoke(panel, null);
+            MainFile.Logger.Info(
+                $"Restored {addedCount} missing input settings entries.");
+        }
     }
 
     public static void EnsureKeyboardEntriesWhenReady(NInputManager inputManager)
@@ -47,15 +84,7 @@ internal static class UndoInputBindings
             return true;
         }
 
-        Dictionary<StringName, Key>? map = ReflectionUtil.GetField<Dictionary<StringName, Key>>(
-            inputManager,
-            "_keyboardInputMap");
-        if (map == null || map.Count == 0)
-        {
-            return true;
-        }
-
-        return !map.TryGetValue(action, out Key boundKey) || boundKey == Key.None;
+        return inputManager.GetCurrentHotkey(action) == Key.None;
     }
 
     public static bool IsUndoAction(InputEventAction action)
@@ -99,10 +128,12 @@ internal static class UndoInputBindings
         {
             for (int attempt = 0; attempt < 120; attempt++)
             {
-                Dictionary<StringName, Key>? map = ReflectionUtil.GetField<Dictionary<StringName, Key>>(
-                    inputManager,
-                    "_keyboardInputMap");
-                if (map?.Count > 0)
+                if (TryGetKeyboardMaps(
+                        inputManager,
+                        out Dictionary<StringName, Key> mouseKeyboardMap,
+                        out Dictionary<StringName, Key> keyboardOnlyMap) &&
+                    mouseKeyboardMap.Count > 0 &&
+                    keyboardOnlyMap.Count > 0)
                 {
                     EnsureKeyboardEntries(inputManager);
                     return;
@@ -126,11 +157,26 @@ internal static class UndoInputBindings
 
     private static void AddKeyboardAction(StringName action)
     {
-        if (NInputManager.remappableKeyboardInputs is List<StringName> keyboardInputs &&
-            !keyboardInputs.Contains(action))
+        AddRemappableInput(NInputManager.remappableMKbInputs, action);
+        AddRemappableInput(NInputManager.remappableKbOnlyInputs, action);
+    }
+
+    private static void AddRemappableInput(
+        IReadOnlyList<StringName> remappableInputs,
+        StringName action)
+    {
+        if (remappableInputs is ICollection<StringName> mutableInputs &&
+            !mutableInputs.Contains(action))
         {
-            keyboardInputs.Add(action);
+            mutableInputs.Add(action);
         }
+    }
+
+    private static IEnumerable<StringName> GetActions()
+    {
+        yield return UndoAction;
+        yield return RedoAction;
+        yield return RestartAction;
     }
 
     private static void AddSettingsTitles()
@@ -162,22 +208,46 @@ internal static class UndoInputBindings
 
     private static void EnsureKeyboardEntries(NInputManager inputManager)
     {
-        Dictionary<StringName, Key>? map = ReflectionUtil.GetField<Dictionary<StringName, Key>>(
-            inputManager,
-            "_keyboardInputMap");
-        if (map == null || map.Count == 0)
+        if (!TryGetKeyboardMaps(
+                inputManager,
+                out Dictionary<StringName, Key> mouseKeyboardMap,
+                out Dictionary<StringName, Key> keyboardOnlyMap) ||
+            mouseKeyboardMap.Count == 0 ||
+            keyboardOnlyMap.Count == 0)
         {
             return;
         }
 
         bool changed = false;
-        changed |= AddUnboundEntry(map, UndoAction);
-        changed |= AddUnboundEntry(map, RedoAction);
-        changed |= AddUnboundEntry(map, RestartAction);
+        changed |= AddUnboundEntry(mouseKeyboardMap, UndoAction);
+        changed |= AddUnboundEntry(mouseKeyboardMap, RedoAction);
+        changed |= AddUnboundEntry(mouseKeyboardMap, RestartAction);
+        changed |= AddUnboundEntry(keyboardOnlyMap, UndoAction);
+        changed |= AddUnboundEntry(keyboardOnlyMap, RedoAction);
+        changed |= AddUnboundEntry(keyboardOnlyMap, RestartAction);
         if (changed)
         {
-            ReflectionUtil.Method(typeof(NInputManager), "SaveKeyboardInputMapping")?.Invoke(inputManager, null);
+            ReflectionUtil.Method(typeof(NInputManager), "SaveMKbInputMapping")?.Invoke(inputManager, null);
+            ReflectionUtil.Method(typeof(NInputManager), "SaveFKbInputMapping")?.Invoke(inputManager, null);
         }
+    }
+
+    private static bool TryGetKeyboardMaps(
+        NInputManager inputManager,
+        out Dictionary<StringName, Key> mouseKeyboardMap,
+        out Dictionary<StringName, Key> keyboardOnlyMap)
+    {
+        Dictionary<StringName, Key>? mouseKeyboardMapCandidate =
+            ReflectionUtil.GetField<Dictionary<StringName, Key>>(
+            inputManager,
+            "_mKbInputMap");
+        Dictionary<StringName, Key>? keyboardOnlyMapCandidate =
+            ReflectionUtil.GetField<Dictionary<StringName, Key>>(
+            inputManager,
+            "_fKbInputMap");
+        mouseKeyboardMap = mouseKeyboardMapCandidate!;
+        keyboardOnlyMap = keyboardOnlyMapCandidate!;
+        return mouseKeyboardMapCandidate != null && keyboardOnlyMapCandidate != null;
     }
 
     private static bool AddUnboundEntry(Dictionary<StringName, Key> map, StringName action)

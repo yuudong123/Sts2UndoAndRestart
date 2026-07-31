@@ -1,6 +1,9 @@
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -8,8 +11,10 @@ using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.addons.mega_text;
 
 namespace UndoAndRestartCode;
@@ -149,6 +154,13 @@ internal static class UndoRedoPatches
         UndoInputBindings.EnsureRegistered();
     }
 
+    [HarmonyPatch(typeof(NInputSettingsPanel), nameof(NInputSettingsPanel._Ready))]
+    [HarmonyPostfix]
+    private static void AfterInputSettingsReady(NInputSettingsPanel __instance)
+    {
+        UndoInputBindings.EnsureSettingsPanelEntries(__instance);
+    }
+
     [HarmonyPatch(typeof(NInputSettingsEntry), nameof(NInputSettingsEntry._Ready))]
     [HarmonyPrefix]
     private static void BeforeInputSettingsEntryReady()
@@ -166,7 +178,15 @@ internal static class UndoRedoPatches
             return;
         }
 
-        ReflectionUtil.GetField<MegaRichTextLabel>(__instance, "_inputLabel")!.Text = label;
+        MegaLabel? inputLabel = ReflectionUtil.GetField<MegaLabel>(__instance, "_inputLabel");
+        if (inputLabel == null)
+        {
+            MainFile.Logger.Warn(
+                $"Failed to localize input settings label for {__instance.InputName}.");
+            return;
+        }
+
+        inputLabel.SetTextAutoSize(label);
         ReflectionUtil.Method(typeof(NInputSettingsEntry), "UpdateInput")?.Invoke(__instance, null);
     }
 
@@ -184,7 +204,306 @@ internal static class UndoRedoPatches
     [HarmonyPostfix]
     private static void AfterQueuedActionFinished(GameAction action)
     {
+        CardChoiceCheckpointService.OnActionFinished(action);
         UndoRedoManager.CaptureCompletedPlayerAction(action);
+    }
+
+    [HarmonyPatch(
+        typeof(NCardPlayQueue),
+        nameof(NCardPlayQueue.OnLocalCardPlayed))]
+    [HarmonyPostfix]
+    private static void AfterLocalCardAddedToPlayQueue(
+        NCardPlayQueue __instance,
+        PlayCardAction action)
+    {
+        CardChoiceCheckpointService.CompleteReplayCardQueueAnimation(
+            __instance,
+            action);
+    }
+
+    [HarmonyPatch(
+        typeof(CardPileCmd),
+        nameof(CardPileCmd.AddDuringManualCardPlay))]
+    [HarmonyPostfix]
+    private static void AfterReplayCardMovedToPlayPile(
+        CardModel card,
+        ref Task __result)
+    {
+        if (CardChoiceCheckpointService.IsReplayingCard(card))
+        {
+            __result =
+                CardChoiceCheckpointService.CompleteReplayCardPlayPileAnimationAsync(
+                    __result,
+                    card);
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(Cmd),
+        nameof(Cmd.Wait),
+        new[] { typeof(float), typeof(bool) })]
+    [HarmonyPrefix]
+    private static bool BeforeReplayVisualWait(ref Task __result)
+    {
+        if (!CardChoiceCheckpointService.IsReplayingBeforeTargetChoice)
+        {
+            return true;
+        }
+
+        __result = Task.CompletedTask;
+        return false;
+    }
+
+    [HarmonyPatch(
+        typeof(Cmd),
+        nameof(Cmd.Wait),
+        new[] { typeof(float), typeof(CancellationToken), typeof(bool) })]
+    [HarmonyPrefix]
+    private static bool BeforeReplayVisualCancelableWait(ref Task __result)
+    {
+        if (!CardChoiceCheckpointService.IsReplayingBeforeTargetChoice)
+        {
+            return true;
+        }
+
+        __result = Task.CompletedTask;
+        return false;
+    }
+
+    [HarmonyPatch(
+        typeof(Cmd),
+        nameof(Cmd.CustomScaledWait),
+        new[]
+        {
+            typeof(float),
+            typeof(float),
+            typeof(bool),
+            typeof(CancellationToken),
+        })]
+    [HarmonyPrefix]
+    private static bool BeforeReplayVisualScaledWait(ref Task __result)
+    {
+        if (!CardChoiceCheckpointService.IsReplayingBeforeTargetChoice)
+        {
+            return true;
+        }
+
+        __result = Task.CompletedTask;
+        return false;
+    }
+
+    [HarmonyPatch(typeof(NItemThrowVfx), nameof(NItemThrowVfx._Ready))]
+    [HarmonyPrefix]
+    private static bool BeforeReplayItemThrowReady(NItemThrowVfx __instance)
+    {
+        if (!CardChoiceCheckpointService.IsReplayingBeforeTargetChoice)
+        {
+            return true;
+        }
+
+        __instance.Visible = false;
+        __instance.QueueFree();
+        return false;
+    }
+
+    [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromChooseACardScreen),
+        new[]
+        {
+            typeof(PlayerChoiceContext),
+            typeof(IReadOnlyList<CardModel>),
+            typeof(Player),
+            typeof(bool),
+        })]
+    [HarmonyPrefix]
+    private static void BeforeChooseACardScreen(bool canSkip)
+    {
+        CardChoiceCheckpointService.PrepareChoiceRequest(
+            CardChoiceRequest.ForChooseCard(canSkip));
+    }
+
+    [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromSimpleGrid),
+        new[]
+        {
+            typeof(PlayerChoiceContext),
+            typeof(IReadOnlyList<CardModel>),
+            typeof(Player),
+            typeof(CardSelectorPrefs),
+        })]
+    [HarmonyPrefix]
+    private static void BeforeSimpleGrid(
+        IReadOnlyList<CardModel> cardsIn,
+        CardSelectorPrefs prefs)
+    {
+        CardChoiceCheckpointService.PrepareChoiceRequest(
+            CardChoiceRequest.ForSimpleGrid(prefs, cardsIn.Count));
+    }
+
+    [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromSimpleGridForRewards),
+        new[]
+        {
+            typeof(PlayerChoiceContext),
+            typeof(List<CardCreationResult>),
+            typeof(Player),
+            typeof(CardSelectorPrefs),
+        })]
+    [HarmonyPrefix]
+    private static void BeforeRewardGrid(
+        List<CardCreationResult> cards,
+        CardSelectorPrefs prefs)
+    {
+        CardChoiceCheckpointService.PrepareChoiceRequest(
+            CardChoiceRequest.ForSimpleGrid(prefs, cards.Count));
+    }
+
+    [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromCombatPile),
+        new[]
+        {
+            typeof(PlayerChoiceContext),
+            typeof(CardPile),
+            typeof(Player),
+            typeof(CardSelectorPrefs),
+            typeof(Func<CardModel, bool>),
+        })]
+    [HarmonyPrefix]
+    private static void BeforeCombatPile(
+        CardPile pile,
+        CardSelectorPrefs prefs,
+        Func<CardModel, bool>? filter)
+    {
+        CardChoiceCheckpointService.PrepareChoiceRequest(
+            CardChoiceRequest.ForCombatPile(pile, prefs, filter));
+    }
+
+    [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromHand),
+        new[]
+        {
+            typeof(PlayerChoiceContext),
+            typeof(Player),
+            typeof(CardSelectorPrefs),
+            typeof(Func<CardModel, bool>),
+            typeof(AbstractModel),
+        })]
+    [HarmonyPrefix]
+    private static void BeforeHandChoice(
+        Player player,
+        CardSelectorPrefs prefs,
+        Func<CardModel, bool>? filter,
+        AbstractModel source)
+    {
+        int availableCardCount = PileType.Hand
+            .GetPile(player)
+            .Cards
+            .Count(filter ?? (_ => true));
+        CardChoiceCheckpointService.PrepareChoiceRequest(
+            CardChoiceRequest.ForHand(
+                prefs,
+                filter,
+                source,
+                availableCardCount));
+    }
+
+    [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromHandForUpgrade),
+        new[]
+        {
+            typeof(PlayerChoiceContext),
+            typeof(Player),
+            typeof(AbstractModel),
+        })]
+    [HarmonyPrefix]
+    private static void BeforeHandUpgrade(
+        Player player,
+        AbstractModel source)
+    {
+        int availableCardCount = PileType.Hand
+            .GetPile(player)
+            .Cards
+            .Count(card => card.IsUpgradable);
+        CardChoiceCheckpointService.PrepareChoiceRequest(
+            CardChoiceRequest.ForHandUpgrade(source, availableCardCount));
+    }
+
+    [HarmonyPatch(typeof(GameActionPlayerChoiceContext), nameof(GameActionPlayerChoiceContext.SignalPlayerChoiceBegun))]
+    [HarmonyPostfix]
+    private static void AfterPlayerChoiceBegun(GameActionPlayerChoiceContext __instance)
+    {
+        CardChoiceCheckpointService.OnChoiceBegun(__instance);
+    }
+
+    [HarmonyPatch(
+        typeof(HookPlayerChoiceContext),
+        nameof(HookPlayerChoiceContext.SignalPlayerChoiceBegun))]
+    [HarmonyPostfix]
+    private static void AfterHookPlayerChoiceBegun(
+        HookPlayerChoiceContext __instance)
+    {
+        CardChoiceCheckpointService.OnHookChoiceBegun(__instance);
+    }
+
+    [HarmonyPatch(typeof(CombatManager), "SetupPlayerTurn")]
+    [HarmonyPrefix]
+    private static void BeforeSetupPlayerTurn(
+        CombatManager __instance,
+        Player player,
+        out HookChoiceRecording? __state)
+    {
+        __state =
+            CardChoiceCheckpointService.BeginTurnStartChoiceRecording(
+                __instance,
+                player);
+    }
+
+    [HarmonyPatch(typeof(CombatManager), "SetupPlayerTurn")]
+    [HarmonyPostfix]
+    private static void AfterSetupPlayerTurn(
+        HookChoiceRecording? __state,
+        ref Task __result)
+    {
+        if (__state != null)
+        {
+            __result =
+                CardChoiceCheckpointService.TrackHookChoiceRecordingAsync(
+                    __result,
+                    __state);
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(CombatManager),
+        nameof(CombatManager.EndPlayerTurnPhaseOneInternal),
+        new Type[] { })]
+    [HarmonyPrefix]
+    private static void BeforeEndPlayerTurnPhaseOne(
+        CombatManager __instance,
+        out HookChoiceRecording? __state)
+    {
+        __state =
+            CardChoiceCheckpointService.BeginTurnEndChoiceRecording(
+                __instance);
+    }
+
+    [HarmonyPatch(
+        typeof(CombatManager),
+        nameof(CombatManager.EndPlayerTurnPhaseOneInternal),
+        new Type[] { })]
+    [HarmonyPostfix]
+    private static void AfterEndPlayerTurnPhaseOne(
+        HookChoiceRecording? __state,
+        ref Task __result)
+    {
+        if (__state != null)
+        {
+            __result =
+                CardChoiceCheckpointService.TrackHookChoiceRecordingAsync(
+                    __result,
+                    __state);
+        }
+    }
+
+    [HarmonyPatch(typeof(CardSelectCmd), "LogChoice")]
+    [HarmonyPostfix]
+    private static void AfterCardsChosen(IEnumerable<CardModel?> cards)
+    {
+        CardChoiceCheckpointService.OnCardsChosen(cards);
     }
 
     [HarmonyPatch(typeof(PlayCardAction), "ExecuteAction")]
@@ -252,7 +571,7 @@ internal static class UndoRedoPatches
     private static void BeforeEndTurn()
     {
         UndoRedoManager.CaptureBeforeAction("EndPlayerTurnAction");
-        UndoRedoManager.QueueTurnTransitionEntry();
+        UndoRedoManager.PrepareNextTurnStartEntry();
     }
 
     [HarmonyPatch(typeof(EndPlayerTurnAction), "ExecuteAction")]

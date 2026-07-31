@@ -161,6 +161,7 @@ internal static class ActionHistoryOverlay
         _tabButton.Visible = true;
         _panel.Visible = _isOpen;
         _tabButton.Text = _isOpen ? UndoText.Close : UndoText.ActionHistory;
+        ApplyGameFont(_tabButton, FontType.Bold);
         if (!_isOpen)
         {
             return;
@@ -591,8 +592,24 @@ internal static class ActionHistoryOverlay
     {
         try
         {
-            if (entry.Kind == ActionHistoryEntryKind.Card)
+            if (entry.Kind is ActionHistoryEntryKind.Card or ActionHistoryEntryKind.CardChoice)
             {
+                if (entry.Kind == ActionHistoryEntryKind.CardChoice)
+                {
+                    Texture2D? sourceTexture = entry.SourceModel switch
+                    {
+                        CardModel card => card.Portrait,
+                        PowerModel power => power.Icon,
+                        RelicModel relic => relic.Icon,
+                        PotionModel potion => potion.Image,
+                        _ => null,
+                    };
+                    if (sourceTexture != null)
+                    {
+                        return sourceTexture;
+                    }
+                }
+
                 return entry.Card?.Portrait;
             }
 
@@ -619,6 +636,7 @@ internal static class ActionHistoryOverlay
     {
         try
         {
+            control.RemoveThemeFontOverride("font");
             control.ApplyLocaleFontSubstitution(fontType, "font");
         }
         catch (Exception ex)
@@ -637,9 +655,10 @@ internal static class ActionHistoryOverlay
         return kind switch
         {
             ActionHistoryEntryKind.Card => new Color(0.45f, 0.72f, 1f),
+            ActionHistoryEntryKind.CardChoice => new Color(0.55f, 0.82f, 1f),
             ActionHistoryEntryKind.Potion => new Color(0.45f, 1f, 0.68f),
             ActionHistoryEntryKind.DiscardPotion => new Color(1f, 0.58f, 0.35f),
-            ActionHistoryEntryKind.TurnTransition => new Color(1f, 0.84f, 0.42f),
+            ActionHistoryEntryKind.TurnStart => new Color(1f, 0.84f, 0.42f),
             _ => Colors.White,
         };
     }

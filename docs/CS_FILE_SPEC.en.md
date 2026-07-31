@@ -6,7 +6,8 @@
 | --- | --- |
 | `MainFile.cs` | Mod initialization entry point. Registers Harmony patches, loads config, and subscribes to combat events. |
 | `UndoRedoPatches.cs` | Central Harmony patch collection. Handles input, action boundary detection, input settings injection, and action-history entry creation. |
-| `ModSettingsPanelPatch.cs` | Adds the snapshot limit and action-history visibility settings UI to the mod info screen. |
+| `ModSettingsPanelPatch.cs` | Adds snapshot count, action-history visibility, and card-selection checkpoint settings to the mod info screen. |
+| `FeatureAnnouncement.cs` | Shows the one-time feature announcement after the main menu becomes ready and persists its acknowledgement. |
 | `NecrobinderVfxSafetyPatches.cs` | Patches `NNecrobinderVfx` head visibility and scythe flame callbacks so disposed Godot nodes do not throw during restore cleanup. |
 
 ## Snapshot Engine
@@ -14,6 +15,7 @@
 | File | Responsibility |
 | --- | --- |
 | `UndoRedoManager.cs` | Owns the snapshot stack and cursor. Handles capture eligibility, undo/redo movement, turn-transition snapshots, and action-history linking. |
+| `CardChoiceCheckpointService.cs` | Captures manual card-selection checkpoints, interrupts an active selection for timeline navigation, and replays the originating action to reconstruct a restored selection screen. |
 | `ObjectGraphSnapshot.cs` | Deep-clones and restores an arbitrary object's field graph through reflection. It also discovers nested mutable `AbstractModel` instances and restores `Rng`, `CardEnergyCost`, `DynamicVarSet`, and collections. |
 | `CombatSnapshot.cs` | Core combat snapshot implementation. Captures and restores creatures, players, models, cards, piles, potions, relics, orbs, combat history, and UI state, then sends card UI refresh notifications. |
 | `RunStateSnapshot.cs` | Stores and restores run-state fields that can be affected during combat. |
@@ -27,8 +29,9 @@
 | --- | --- |
 | `ActionHistoryOverlay.cs` | Builds and renders the top-right action history tab. Handles card/potion images, turn separators, current snapshot display, hover effects, and click-to-restore behavior. |
 | `UndoInputBindings.cs` | Registers undo/redo/restart actions in the game's input settings and connects user-defined bindings with fallback default keys. |
-| `UndoText.cs` | Provides Korean, English, and Chinese UI strings based on the current game language. |
-| `UndoAndRestartConfig.cs` | Loads and saves the snapshot limit and action-history overlay visibility settings. |
+| `UndoText.cs` | Loads localized UI strings and selects the matching language with English fallback. |
+| `UndoAndRestartConfig.cs` | Loads and saves snapshot count, overlay visibility, card-selection checkpoint, and announcement acknowledgement settings. |
+| `language/*.json` | Contains English, Korean, Japanese, Simplified Chinese, and Traditional Chinese user-facing strings. |
 
 ## Restore Safety Helpers
 
@@ -51,7 +54,7 @@
 | Type | Responsibility |
 | --- | --- |
 | `ActionHistoryEntry` in `UndoRedoManager.cs` | Action-history item shown in the overlay. Stores the action type, target snapshot index, and turn number. |
-| `ActionHistoryEntryKind` in `UndoRedoManager.cs` | Distinguishes card, potion, potion discard, and turn-transition entries. |
+| `ActionHistoryEntryKind` in `UndoRedoManager.cs` | Distinguishes card, potion, potion discard, card-choice, and turn-transition entries. |
 | `RuntimeBlockerKind` in `CombatRuntimeStateCleanup.cs` | Categorizes runtime blockers for logging and recovery decisions. |
 
 ## Maintenance Rules

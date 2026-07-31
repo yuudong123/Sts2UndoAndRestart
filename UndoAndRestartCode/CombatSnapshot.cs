@@ -69,8 +69,7 @@ internal sealed class CombatSnapshot
         _playerActionsDisabled = CombatManager.Instance.PlayerActionsDisabled;
         _endingPlayerTurnPhaseOne = CombatManager.Instance.EndingPlayerTurnPhaseOne;
         _endingPlayerTurnPhaseTwo = CombatManager.Instance.EndingPlayerTurnPhaseTwo;
-        _playersTakingExtraTurn =
-            ReflectionUtil.GetRequiredField<List<Player>>(CombatManager.Instance, "_playersTakingExtraTurn").ToList();
+        _playersTakingExtraTurn = CombatManager.Instance.PlayersTakingExtraTurn.ToList();
         _nextActionId = RunManager.Instance.ActionQueueSet.NextActionId;
         _nextHookId = RunManager.Instance.ActionQueueSynchronizer.NextHookId;
         _choiceIds = RunManager.Instance.PlayerChoiceSynchronizer.ChoiceIds.ToList();
@@ -407,21 +406,31 @@ internal sealed class CombatSnapshot
     private void ResetCombatManagerFlags()
     {
         CombatManager manager = CombatManager.Instance;
-        ReflectionUtil.SetRequiredField(manager, "_pendingLoss", null);
-        ReflectionUtil.SetRequiredField(manager, "_playerActionsDisabled", false);
-        ReflectionUtil.SetRequiredField(manager, "_playerToEnemyTransitionFired", false);
-        ReflectionUtil.SetRequiredField(manager, "_inPlayerTurnSetup", false);
-        ReflectionUtil.SetRequiredField(manager, "_deferredEndTurnTransition", null);
-        ReflectionUtil.SetRequiredField(manager, "<IsPaused>k__BackingField", false);
-        ReflectionUtil.SetRequiredField(manager, "<IsEnemyTurnStarted>k__BackingField", _currentSide == CombatSide.Enemy);
-        ReflectionUtil.SetRequiredField(manager, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
-        ReflectionUtil.SetRequiredField(manager, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
+        object turnState = CombatRuntimeStateCleanup.GetCurrentTurnState(_state) ??
+                           throw new InvalidOperationException(
+                               "Current combat turn state does not match the restored snapshot.");
 
-        ReflectionUtil.GetRequiredField<HashSet<Player>>(manager, "_playersReadyToEndTurn").Clear();
-        ReflectionUtil.GetRequiredField<HashSet<Player>>(manager, "_playersReadyToBeginEnemyTurn").Clear();
+        ReflectionUtil.SetRequiredField(turnState, "<PendingLoss>k__BackingField", null);
+        ReflectionUtil.SetRequiredField(manager, "_playerActionsDisabled", false);
+        ReflectionUtil.SetRequiredField(manager, "<IsPaused>k__BackingField", false);
+        ReflectionUtil.SetRequiredField(
+            turnState,
+            "<IsEnemyTurnStarted>k__BackingField",
+            _currentSide == CombatSide.Enemy);
+        ReflectionUtil.SetRequiredField(turnState, "<EndingPlayerTurnPhaseOne>k__BackingField", false);
+        ReflectionUtil.SetRequiredField(turnState, "<EndingPlayerTurnPhaseTwo>k__BackingField", false);
+
+        ReflectionUtil.GetRequiredField<HashSet<Player>>(
+            turnState,
+            "<PlayersReadyToEndTurn>k__BackingField").Clear();
+        ReflectionUtil.GetRequiredField<HashSet<Player>>(
+            turnState,
+            "<PlayersReadyToBeginEnemyTurn>k__BackingField").Clear();
         ReflectionUtil.GetRequiredField<Dictionary<Player, int>>(manager, "_cardOrPotionEffectDepth").Clear();
         ReflectionUtil.ReplaceList(
-            ReflectionUtil.GetRequiredField<List<Player>>(manager, "_playersTakingExtraTurn"),
+            ReflectionUtil.GetRequiredField<List<Player>>(
+                turnState,
+                "<PlayersTakingExtraTurn>k__BackingField"),
             _playersTakingExtraTurn);
 
         ReflectionUtil.SetRequiredField(RunManager.Instance.ActionQueueSet, "_nextId", _nextActionId);
