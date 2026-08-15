@@ -475,7 +475,7 @@ internal static class UndoRedoPatches
 
     [HarmonyPatch(
         typeof(CombatManager),
-        nameof(CombatManager.EndPlayerTurnPhaseOneInternal),
+        "EndPlayerTurnPhaseOneInternal",
         new Type[] { })]
     [HarmonyPrefix]
     private static void BeforeEndPlayerTurnPhaseOne(
@@ -489,7 +489,7 @@ internal static class UndoRedoPatches
 
     [HarmonyPatch(
         typeof(CombatManager),
-        nameof(CombatManager.EndPlayerTurnPhaseOneInternal),
+        "EndPlayerTurnPhaseOneInternal",
         new Type[] { })]
     [HarmonyPostfix]
     private static void AfterEndPlayerTurnPhaseOne(

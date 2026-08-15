@@ -80,6 +80,12 @@ internal static class TransientCardVfxCleanup
 
         foreach (Node child in root.GetChildren())
         {
+            if (child is NCardExhaustQuickVfx quickExhaustVfx)
+            {
+                QueueQuickExhaustTreeForDeletion(quickExhaustVfx);
+                continue;
+            }
+
             if (IsTransientCardVfx(child))
             {
                 RemoveImmediately(child);
@@ -109,6 +115,29 @@ internal static class TransientCardVfxCleanup
         }
 
         return false;
+    }
+
+    private static void QueueQuickExhaustTreeForDeletion(
+        NCardExhaustQuickVfx quickExhaustVfx)
+    {
+        // The quick exhaust VFX is a child of the card it owns. Its _ExitTree
+        // callback queues that parent card for deletion. Removing the child
+        // immediately while traversing the card tree therefore re-enters
+        // RemoveChild on an ancestor and can crash Godot. Queue the parent
+        // first so the callback observes an already-deleting card.
+        NCard? card = ReflectionUtil.GetField<NCard>(quickExhaustVfx, "_cardNode");
+        if (card != null &&
+            GodotObject.IsInstanceValid(card) &&
+            !card.IsQueuedForDeletion())
+        {
+            card.QueueFree();
+        }
+
+        if (GodotObject.IsInstanceValid(quickExhaustVfx) &&
+            !quickExhaustVfx.IsQueuedForDeletion())
+        {
+            quickExhaustVfx.QueueFree();
+        }
     }
 
     private static void RemoveImmediately(Node node)

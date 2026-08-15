@@ -831,7 +831,7 @@ internal static class CardChoiceCheckpointService
                 actions.Remove(activeAction);
             }
 
-            ReflectionUtil.SetRequiredField(queue, "isCancellingPlayCardActions", false);
+            ClearChoiceCancellationMarker(queue);
         }
 
         IList waitingResumptions =
@@ -848,6 +848,30 @@ internal static class CardChoiceCheckpointService
 
         RunManager.Instance.ActionQueueSet.UnpauseAllPlayerQueues();
         ReflectionUtil.Method(actionQueueSet.GetType(), "CheckIfQueuesEmpty")?.Invoke(actionQueueSet, null);
+    }
+
+    private static void ClearChoiceCancellationMarker(object queue)
+    {
+        // 0.110 stored this state as a bool. 0.111 keeps the action which started
+        // cancellation instead, so timeline interruption must support both layouts.
+        bool cleared = false;
+        if (ReflectionUtil.Field(queue.GetType(), "actionCancellingPlayCardActions") != null)
+        {
+            ReflectionUtil.SetField(queue, "actionCancellingPlayCardActions", null);
+            cleared = true;
+        }
+
+        if (ReflectionUtil.Field(queue.GetType(), "isCancellingPlayCardActions") != null)
+        {
+            ReflectionUtil.SetField(queue, "isCancellingPlayCardActions", false);
+            cleared = true;
+        }
+
+        if (!cleared)
+        {
+            MainFile.Logger.Warn(
+                "Could not find the action-queue card-choice cancellation marker.");
+        }
     }
 
     private static void FinishReplay(GameAction? action)
@@ -1203,7 +1227,15 @@ internal sealed class CardChoiceReplaySequence
         {
             RunManager.Instance.ActionQueueSynchronizer.SetCombatState(
                 ActionSynchronizerCombatState.EndTurnPhaseOne);
-            await CombatManager.Instance.EndPlayerTurnPhaseOneInternal();
+            Task endTurnTask = (Task)(ReflectionUtil.Method(
+                    typeof(CombatManager),
+                    "EndPlayerTurnPhaseOneInternal",
+                    Type.EmptyTypes)
+                ?.Invoke(CombatManager.Instance, null) ??
+                throw new MissingMethodException(
+                    typeof(CombatManager).FullName,
+                    "EndPlayerTurnPhaseOneInternal"));
+            await endTurnTask;
             if (!CombatManager.Instance.IsInProgress ||
                 !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state))
             {
