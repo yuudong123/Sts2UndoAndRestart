@@ -30,4 +30,14 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <Target Name="CopyToModsFolderOnBuild" AfterTargets="Build" Condition="'$(CopyToModsFolder)' == 'true'">
+    <PropertyGroup>
+      <LocalModDir>$(Sts2InstallDir)\mods\UndoAndRestart</LocalModDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(LocalModDir)\language" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(LocalModDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\UndoAndRestart.json" DestinationFolder="$(LocalModDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(Content)" DestinationFolder="$(LocalModDir)\language" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

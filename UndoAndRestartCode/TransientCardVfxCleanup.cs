@@ -10,6 +10,157 @@ namespace UndoAndRestartCode;
 
 internal static class TransientCardVfxCleanup
 {
+    private static readonly object ActiveVisualLock = new();
+    private static readonly Dictionary<GodotObject, int> ActiveVisualTasks =
+        new(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+
+    public static async Task TrackAsync(Task original, GodotObject owner)
+    {
+        lock (ActiveVisualLock)
+        {
+            ActiveVisualTasks[owner] = ActiveVisualTasks.GetValueOrDefault(owner) + 1;
+        }
+
+        try
+        {
+            await original;
+        }
+        finally
+        {
+            lock (ActiveVisualLock)
+            {
+                if (ActiveVisualTasks.TryGetValue(owner, out int count) && count > 1)
+                {
+                    ActiveVisualTasks[owner] = count - 1;
+                }
+                else
+                {
+                    ActiveVisualTasks.Remove(owner);
+                }
+            }
+        }
+    }
+
+    public static int QuarantineForRestore()
+    {
+        GodotObject[] activeOwners = SnapshotActiveOwners();
+        if (activeOwners.Length > 0)
+        {
+            QuarantineActiveVisuals(activeOwners);
+            MainFile.Logger.Info(
+                $"Quarantined {activeOwners.Length} old-timeline transient card VFX owner(s) for restore.");
+        }
+
+        return activeOwners.Length;
+    }
+
+    public static int ActiveVisualCount => SnapshotActiveOwners().Length;
+
+    private static GodotObject[] SnapshotActiveOwners()
+    {
+        lock (ActiveVisualLock)
+        {
+            return ActiveVisualTasks.Keys.ToArray();
+        }
+    }
+
+    private static bool IsActiveVisual(GodotObject owner)
+    {
+        lock (ActiveVisualLock)
+        {
+            return ActiveVisualTasks.ContainsKey(owner);
+        }
+    }
+
+    private static bool ContainsActiveVisual(Node root)
+    {
+        foreach (GodotObject owner in SnapshotActiveOwners())
+        {
+            if (owner is not Node activeNode ||
+                !GodotObject.IsInstanceValid(activeNode))
+            {
+                continue;
+            }
+
+            if (ReferenceEquals(root, activeNode) || root.IsAncestorOf(activeNode))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsReferencedByActiveVisual(Node candidate)
+    {
+        foreach (GodotObject owner in SnapshotActiveOwners())
+        {
+            if (!GodotObject.IsInstanceValid(owner))
+            {
+                continue;
+            }
+
+            // Card fly/shuffle effects own their detached trail through _vfx.
+            // The trail is a sibling in the scene tree, not a child, so ancestry
+            // checks alone cannot see that its still-running owner will use it.
+            if (ReferenceEquals(
+                    ReflectionUtil.GetField<Node>(owner, "_vfx"),
+                    candidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void QuarantineActiveVisuals(IEnumerable<GodotObject> owners)
+    {
+        foreach (GodotObject owner in owners)
+        {
+            if (!GodotObject.IsInstanceValid(owner))
+            {
+                continue;
+            }
+
+            if (owner is CanvasItem canvasItem)
+            {
+                canvasItem.Visible = false;
+            }
+
+            if (TryGetOwnedCard(owner) is { } card &&
+                GodotObject.IsInstanceValid(card))
+            {
+                card.Visible = false;
+            }
+        }
+    }
+
+    public static bool IsCardReferencedByActiveVisual(NCard card)
+    {
+        foreach (GodotObject owner in SnapshotActiveOwners())
+        {
+            if (GodotObject.IsInstanceValid(owner) &&
+                ReferenceEquals(TryGetOwnedCard(owner), card))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static NCard? TryGetOwnedCard(GodotObject owner)
+    {
+        if (owner is NCardFlyPowerVfx flyPower)
+        {
+            return flyPower.CardNode;
+        }
+
+        return ReflectionUtil.GetField<NCard>(owner, "_cardNode") ??
+               ReflectionUtil.GetField<NCard>(owner, "_card");
+    }
+
     public static void Clear()
     {
         NCombatRoom? room = NCombatRoom.Instance;
@@ -88,6 +239,12 @@ internal static class TransientCardVfxCleanup
 
             if (IsTransientCardVfx(child))
             {
+                if (IsActiveVisual(child))
+                {
+                    QuarantineActiveVisuals(new[] { child });
+                    continue;
+                }
+
                 RemoveImmediately(child);
                 continue;
             }
@@ -147,14 +304,39 @@ internal static class TransientCardVfxCleanup
             return;
         }
 
+        if (node is NCard card && IsCardReferencedByActiveVisual(card))
+        {
+            card.Visible = false;
+            return;
+        }
+
+        if (IsActiveVisual(node) ||
+            ContainsActiveVisual(node) ||
+            IsReferencedByActiveVisual(node))
+        {
+            if (node is CanvasItem canvasItem)
+            {
+                canvasItem.Visible = false;
+            }
+
+            QuarantineActiveVisuals(SnapshotActiveOwners());
+            return;
+        }
+
         node.GetParent()?.RemoveChild(node);
-        node.QueueFree();
+        node.QueueFreeSafely();
     }
 
     private static void RemoveCardImmediately(NCard card)
     {
         if (!GodotObject.IsInstanceValid(card) || card.IsQueuedForDeletion())
         {
+            return;
+        }
+
+        if (IsCardReferencedByActiveVisual(card))
+        {
+            card.Visible = false;
             return;
         }
 

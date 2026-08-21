@@ -209,9 +209,23 @@ internal sealed class CombatSnapshot
         return _players.Keys.FirstOrDefault();
     }
 
-    public void Restore(bool validate = true)
+    public async Task RestoreAsync(
+        bool validate = true,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureActionRuntimeIdle();
+        // Tracked card effects own only presentation nodes. Hide the abandoned
+        // timeline immediately and let its tasks finish against those isolated
+        // nodes; waiting for their animation duration made navigation feel laggy.
+        TransientCardVfxCleanup.QuarantineForRestore();
         TransientCardVfxCleanup.Clear();
+        // A death animation owns asynchronous work that can hide UI and queue-free its
+        // creature node long after the model has been restored.  Detach those nodes
+        // while they still see the live timeline so _ExitTree cancels that work and
+        // unsubscribes from the correct power instances.  SyncCreatureNodes creates a
+        // clean projection after all model state has been restored.
+        CreaturePresentationLifecycle.PrepareForRestore();
         RestoreCreatures();
         _runState.Restore();
         RestoreModels();
@@ -222,10 +236,20 @@ internal sealed class CombatSnapshot
         RestoreRunHistory();
         RestoreCardRuntimeStates();
         ClearTransientRelicActivationStates();
-        RestoreUi();
+        await RestoreUiAsync(cancellationToken);
         if (validate)
         {
             SnapshotValidator.ValidatePlayableState(_state);
+        }
+    }
+
+    private static void EnsureActionRuntimeIdle()
+    {
+        if (RunManager.Instance.ActionExecutor.CurrentlyRunningAction != null ||
+            !RunManager.Instance.ActionQueueSet.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                "Snapshot restore attempted while the action runtime still owned work.");
         }
     }
 
@@ -309,18 +333,8 @@ internal sealed class CombatSnapshot
                     MainFile.Logger.Warn($"Failed to subscribe creature {creature.LogName}: {ex.Message}");
                 }
 
-                if (NCombatRoom.Instance?.GetCreatureNode(creature) == null &&
-                    !ParkedCreatureNodeRegistry.Unpark(creature))
-                {
-                    try
-                    {
-                        NCombatRoom.Instance?.AddCreature(creature);
-                    }
-                    catch (Exception ex)
-                    {
-                        MainFile.Logger.Warn($"Failed to re-add creature node {creature.LogName}: {ex.Message}");
-                    }
-                }
+                // Creature nodes are presentation.  Recreate them only after every
+                // creature/model field has been restored, in SyncCreatureNodes.
             }
         }
 
@@ -384,7 +398,7 @@ internal sealed class CombatSnapshot
         _runHistory.Restore();
     }
 
-    private void RestoreUi()
+    private async Task RestoreUiAsync(CancellationToken cancellationToken)
     {
         ResetCombatManagerFlags();
         ResetTargetingState();
@@ -396,8 +410,13 @@ internal sealed class CombatSnapshot
         ClearTransientCardPlayUi();
         NormalizeHandInteractionState();
         RefreshHandUi();
+        if (NPlayerHand.Instance is { } hand && GodotObject.IsInstanceValid(hand))
+        {
+            ReflectionUtil.Method(typeof(NPlayerHand), "AnimDisable")
+                ?.Invoke(hand, null);
+        }
         SovereignBladeVfxSync.Refresh(_players.Keys);
-        RefreshCreatureUi();
+        await RefreshCreatureUiAsync(cancellationToken);
         RefreshPileEvents();
         RefreshPileCounters();
         NotifyCombatStateChanged();
@@ -411,7 +430,9 @@ internal sealed class CombatSnapshot
                                "Current combat turn state does not match the restored snapshot.");
 
         ReflectionUtil.SetRequiredField(turnState, "<PendingLoss>k__BackingField", null);
-        ReflectionUtil.SetRequiredField(manager, "_playerActionsDisabled", false);
+        // UndoRedoManager owns the restore transaction lock. SetCombatState below
+        // normally unpauses queues, so this method must preserve that lock.
+        ReflectionUtil.SetRequiredField(manager, "_playerActionsDisabled", true);
         ReflectionUtil.SetRequiredField(manager, "<IsPaused>k__BackingField", false);
         ReflectionUtil.SetRequiredField(
             turnState,
@@ -440,10 +461,10 @@ internal sealed class CombatSnapshot
             ReflectionUtil.GetRequiredField<List<uint>>(RunManager.Instance.PlayerChoiceSynchronizer, "_choiceIds"),
             _choiceIds);
 
-        RunManager.Instance.ActionExecutor.Unpause();
-        RunManager.Instance.ActionQueueSet.UnpauseAllPlayerQueues();
         RunManager.Instance.ActionQueueSynchronizer.SetCombatState(
             _currentSide == CombatSide.Player ? ActionSynchronizerCombatState.PlayPhase : ActionSynchronizerCombatState.NotPlayPhase);
+        RunManager.Instance.ActionExecutor.Pause();
+        RunManager.Instance.ActionQueueSet.PauseAllPlayerQueues();
     }
 
     private static void ResetTargetingState()
@@ -482,7 +503,7 @@ internal sealed class CombatSnapshot
         {
             if (!wanted.Contains(node.Entity))
             {
-                ParkedCreatureNodeRegistry.Park(node.Entity);
+                CreaturePresentationLifecycle.Retire(node.Entity);
             }
         }
 
@@ -490,11 +511,6 @@ internal sealed class CombatSnapshot
         {
             if (room.GetCreatureNode(creature) == null)
             {
-                if (ParkedCreatureNodeRegistry.Unpark(creature))
-                {
-                    continue;
-                }
-
                 try
                 {
                     room.AddCreature(creature);
@@ -579,7 +595,7 @@ internal sealed class CombatSnapshot
         if (potion != null && GodotObject.IsInstanceValid(potion))
         {
             potion.GetParent()?.RemoveChild(potion);
-            potion.QueueFree();
+            potion.QueueFreeSafely();
         }
 
         ReflectionUtil.SetField(holder, "<Potion>k__BackingField", null);
@@ -629,7 +645,7 @@ internal sealed class CombatSnapshot
             if (GodotObject.IsInstanceValid(holder))
             {
                 inventory.RemoveChild(holder);
-                holder.QueueFree();
+                holder.QueueFreeSafely();
             }
         }
         holders.Clear();
@@ -764,7 +780,7 @@ internal sealed class CombatSnapshot
                 if (GodotObject.IsInstanceValid(oldOrb))
                 {
                     oldOrb.GetParent()?.RemoveChild(oldOrb);
-                    oldOrb.QueueFree();
+                    oldOrb.QueueFreeSafely();
                 }
             }
 
@@ -773,7 +789,7 @@ internal sealed class CombatSnapshot
                 if (!orbNodes.Contains(strayOrb) && GodotObject.IsInstanceValid(strayOrb))
                 {
                     orbContainer.RemoveChild(strayOrb);
-                    strayOrb.QueueFree();
+                    strayOrb.QueueFreeSafely();
                 }
             }
 
@@ -965,7 +981,7 @@ internal sealed class CombatSnapshot
         if (currentCardPlay != null && GodotObject.IsInstanceValid(currentCardPlay))
         {
             currentCardPlay.GetParent()?.RemoveChild(currentCardPlay);
-            currentCardPlay.QueueFree();
+            currentCardPlay.QueueFreeSafely();
         }
 
         ReflectionUtil.SetField(hand, "_currentCardPlay", null);
@@ -1212,13 +1228,15 @@ internal sealed class CombatSnapshot
         }
 
         node.GetParent()?.RemoveChild(node);
-        node.QueueFree();
+        node.QueueFreeSafely();
     }
 
-    private void RefreshCreatureUi()
+    private async Task RefreshCreatureUiAsync(CancellationToken cancellationToken)
     {
+        List<Task> intentRefreshes = new();
         foreach (Creature creature in _allies.Concat(_enemies))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             NCreature? node = NCombatRoom.Instance?.GetCreatureNode(creature);
             if (node == null)
             {
@@ -1232,8 +1250,14 @@ internal sealed class CombatSnapshot
             ReflectionUtil.Method(stateDisplay?.GetType() ?? typeof(Node), "RefreshValues")?.Invoke(stateDisplay!, null);
             if (creature.IsEnemy && creature.IsAlive)
             {
-                TaskHelper.RunSafely(node.RefreshIntents());
+                intentRefreshes.Add(node.RefreshIntents());
             }
+        }
+
+        foreach (Task refresh in intentRefreshes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await refresh;
         }
     }
 
@@ -1244,7 +1268,6 @@ internal sealed class CombatSnapshot
         {
             if (creature.IsAlive)
             {
-                node.DeathAnimationTask = null;
                 node.Hitbox.FocusMode = Control.FocusModeEnum.All;
             }
 
@@ -1299,7 +1322,7 @@ internal sealed class CombatSnapshot
 
         foreach (Node powerNode in existingNodes)
         {
-            powerNode.QueueFree();
+            powerNode.QueueFreeSafely();
         }
 
         powerNodes.Clear();
@@ -1418,7 +1441,7 @@ internal sealed class CombatSnapshot
         NCreature? node = NCombatRoom.Instance?.GetCreatureNode(creature);
         if (node != null)
         {
-            ParkedCreatureNodeRegistry.Park(creature);
+            CreaturePresentationLifecycle.Retire(creature);
         }
     }
 

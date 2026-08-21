@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace UndoAndRestartCode;
@@ -26,8 +27,17 @@ internal static class UndoRedoManager
     private static int _readyCaptureRequestId;
     private static int? _pendingTurnStartTurnNumber;
     private static readonly List<ActionHistoryEntry> PendingEntries = new();
+    private static readonly Dictionary<GameAction, ActionHistoryEntry> PendingEntriesByAction = new();
+    private static readonly Dictionary<GameAction, int> ActionGenerations = new();
     private static bool _choiceNavigationInProgress;
+    private static bool _navigationInProgress;
+    private static int _navigationRequestId;
+    private static int _timelineGeneration;
+    private static CancellationTokenSource? _restoreCancellation;
     private static bool _forceNextPlayerControlReadySnapshot;
+    private static int? _queuedNavigationDirection;
+    private static UndoCheckpoint? _queuedNavigationCheckpoint;
+    private static string? _queuedNavigationSource;
 
     public static void Reset()
     {
@@ -35,12 +45,20 @@ internal static class UndoRedoManager
         _sessionState = null;
         _isRestoring = false;
         _choiceNavigationInProgress = false;
+        _navigationInProgress = false;
+        _navigationRequestId++;
+        _timelineGeneration++;
+        _restoreCancellation?.Cancel();
+        _restoreCancellation?.Dispose();
+        _restoreCancellation = null;
         _forceNextPlayerControlReadySnapshot = false;
+        ClearQueuedNavigation();
         _pendingTurnStartTurnNumber = null;
         PendingEntries.Clear();
+        PendingEntriesByAction.Clear();
+        ActionGenerations.Clear();
         CardChoiceCheckpointService.Reset();
         CombatRuntimeStateCleanup.ResetRuntimeBlockerObservation();
-        ParkedCreatureNodeRegistry.Clear();
         _readyCaptureRequestId++;
         MainFile.Logger.Info("Combat history reset.");
         ActionHistoryOverlay.Refresh();
@@ -49,17 +67,24 @@ internal static class UndoRedoManager
     public static bool HandleUndoKey()
     {
         MainFile.Logger.Info("Left arrow pressed.");
-        return TryMove(-1);
+        return RequestMove(-1);
     }
 
     public static bool HandleRedoKey()
     {
         MainFile.Logger.Info("Right arrow pressed.");
-        return TryMove(1);
+        return RequestMove(1);
     }
 
-    public static void CaptureBeforeAction(string reason)
+    public static void CaptureBeforeAction(GameAction action, string reason)
     {
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (state != null)
+        {
+            StartSessionIfNeeded(state);
+            ActionGenerations[action] = _timelineGeneration;
+        }
+
         MainFile.Logger.Debug($"Registered action start: {reason}");
         FinalizeForcedPlayerControlReadySnapshotBeforeAction(reason);
         CaptureInitialSnapshotBeforeFirstPlayerAction(reason);
@@ -73,7 +98,7 @@ internal static class UndoRedoManager
             return;
         }
 
-        CapturePlayerControlReadySnapshot();
+        CapturePlayerControlReadySnapshot(allowTimelineBranch: true);
         if (!_forceNextPlayerControlReadySnapshot)
         {
             MainFile.Logger.Info(
@@ -116,24 +141,42 @@ internal static class UndoRedoManager
         }
     }
 
-    public static async Task CaptureAfterActionAsync(Task original, string reason)
+    public static async Task CaptureAfterActionAsync(Task original, GameAction action, string reason)
     {
-        await CaptureAfterActionAsync(original, reason, null);
+        await CaptureAfterActionAsync(original, action, reason, null);
     }
 
-    public static async Task CaptureAfterActionAsync(Task original, string reason, ActionHistoryEntry? entry)
+    public static async Task CaptureAfterActionAsync(
+        Task original,
+        GameAction action,
+        string reason,
+        ActionHistoryEntry? entry)
     {
-        await original;
-        if (_choiceNavigationInProgress)
+        int generation = ActionGenerations.GetValueOrDefault(action, -1);
+        try
+        {
+            await original;
+        }
+        catch
+        {
+            DiscardPendingEntry(action);
+            throw;
+        }
+
+        if (_choiceNavigationInProgress ||
+            generation != _timelineGeneration ||
+            !IsActionFromCurrentTimeline(action))
         {
             MainFile.Logger.Debug(
-                $"Skipped completed action recording during card choice navigation: {reason}");
+                $"Skipped stale completed action recording: {reason}");
+            DiscardPendingEntry(action);
             return;
         }
 
         if (entry != null)
         {
             PendingEntries.Add(entry);
+            PendingEntriesByAction[action] = entry;
         }
 
         RequestPlayerControlReadyCapture($"{reason}:settled");
@@ -144,7 +187,18 @@ internal static class UndoRedoManager
         if (_choiceNavigationInProgress)
         {
             MainFile.Logger.Debug(
-                $"Skipped action boundary during card choice navigation: {action.GetType().Name}");
+                $"Skipped interrupted choice action boundary: {action.GetType().Name}");
+            DiscardPendingEntry(action);
+            ActionGenerations.Remove(action);
+            return;
+        }
+
+        if (!IsActionFromCurrentTimeline(action))
+        {
+            MainFile.Logger.Debug(
+                $"Skipped stale action boundary: {action.GetType().Name}");
+            DiscardPendingEntry(action);
+            ActionGenerations.Remove(action);
             return;
         }
 
@@ -152,6 +206,8 @@ internal static class UndoRedoManager
         {
             MainFile.Logger.Warn(
                 $"Skipped failed action boundary: {action.GetType().Name}.");
+            DiscardPendingEntry(action);
+            ActionGenerations.Remove(action);
             return;
         }
 
@@ -159,27 +215,56 @@ internal static class UndoRedoManager
             action is not UsePotionAction &&
             action is not DiscardPotionGameAction)
         {
+            ActionGenerations.Remove(action);
+            return;
+        }
+
+        if (_navigationInProgress && !_isRestoring)
+        {
+            ActionGenerations.Remove(action);
+            _forceNextPlayerControlReadySnapshot = true;
+            RequestPlayerControlReadyCapture(
+                $"{action.GetType().Name}:navigation-deferred");
+            MainFile.Logger.Debug(
+                $"Deferred action boundary until navigation completes: {action.GetType().Name}");
             return;
         }
 
         int snapshotIndex = Capture(
             $"{action.GetType().Name}:boundary",
-            strictPlayPhase: true);
+            strictPlayPhase: true,
+            allowTimelineBranch: true);
         if (snapshotIndex < 0)
         {
+            DiscardPendingEntry(action);
+            ActionGenerations.Remove(action);
             return;
         }
 
-        if (PendingEntries.Count > 0)
+        if (PendingEntriesByAction.Remove(action, out ActionHistoryEntry? pendingEntry))
         {
-            ActionHistoryEntry pendingEntry = PendingEntries[0];
-            PendingEntries.RemoveAt(0);
+            PendingEntries.Remove(pendingEntry);
             pendingEntry.SnapshotIndex = snapshotIndex;
             ActionEntries.Add(pendingEntry);
             TrimActionEntriesToSnapshots();
         }
 
+        ActionGenerations.Remove(action);
         ActionHistoryOverlay.Refresh();
+    }
+
+    public static bool IsActionFromCurrentTimeline(GameAction action)
+    {
+        return ActionGenerations.TryGetValue(action, out int generation) &&
+               generation == _timelineGeneration;
+    }
+
+    private static void DiscardPendingEntry(GameAction action)
+    {
+        if (PendingEntriesByAction.Remove(action, out ActionHistoryEntry? entry))
+        {
+            PendingEntries.Remove(entry);
+        }
     }
 
     public static void ScheduleFailedCardChoiceReplayRecovery(
@@ -195,27 +280,15 @@ internal static class UndoRedoManager
     private static async Task RecoverFailedCardChoiceReplayAsync(
         CardChoiceReplayPoint replayPoint)
     {
-        ActionExecutor actionExecutor = RunManager.Instance.ActionExecutor;
-        for (int frame = 0;
-             frame < 60 && actionExecutor.CurrentlyRunningAction != null;
-             frame++)
+        for (int frame = 0; frame < 240 && _navigationInProgress; frame++)
         {
-            if (Engine.GetMainLoop() is SceneTree sceneTree)
-            {
-                await sceneTree.ToSignal(
-                    sceneTree,
-                    SceneTree.SignalName.ProcessFrame);
-            }
-            else
-            {
-                await Task.Delay(16);
-            }
+            await AwaitProcessFramesAsync(1, CancellationToken.None);
         }
 
-        if (actionExecutor.CurrentlyRunningAction != null)
+        if (_navigationInProgress)
         {
             MainFile.Logger.Error(
-                "Could not recover the failed card choice replay because its action did not settle.");
+                "Could not serialize failed card choice recovery behind timeline navigation.");
             return;
         }
 
@@ -229,38 +302,61 @@ internal static class UndoRedoManager
             return;
         }
 
-        int firstChoiceIndex = Checkpoints.FindIndex(checkpoint =>
-            ReferenceEquals(
-                checkpoint.CardChoice?.Sequence,
-                replayPoint.Sequence));
-        if (firstChoiceIndex < 0)
-        {
-            MainFile.Logger.Warn(
-                "Skipped failed card choice replay recovery because its timeline no longer exists.");
-            return;
-        }
-
-        CombatSnapshot replayBaseSnapshot = Checkpoints[firstChoiceIndex].Snapshot;
-        bool previousCheckpointUsesReplayBase =
-            firstChoiceIndex > 0 &&
-            ReferenceEquals(
-                Checkpoints[firstChoiceIndex - 1].Snapshot,
-                replayBaseSnapshot);
-
-        _isRestoring = true;
+        _navigationInProgress = true;
+        int requestId = ++_navigationRequestId;
+        _restoreCancellation?.Cancel();
+        _restoreCancellation?.Dispose();
+        _restoreCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = _restoreCancellation.Token;
         _readyCaptureRequestId++;
         _forceNextPlayerControlReadySnapshot = false;
+        RestoreExecutionScope? restoreScope = null;
         try
         {
-            replayBaseSnapshot.Restore(validate: false);
-            SnapshotValidator.ValidatePlayableState(state);
+            restoreScope = RestoreExecutionScope.Acquire(state);
+            if (!await WaitForRestorableRuntimeAsync(
+                    state,
+                    requestId,
+                    "failed card choice recovery",
+                    cancellationToken))
+            {
+                return;
+            }
+
+            int firstChoiceIndex = Checkpoints.FindIndex(checkpoint =>
+                ReferenceEquals(
+                    checkpoint.CardChoice?.Sequence,
+                    replayPoint.Sequence));
+            if (firstChoiceIndex < 0)
+            {
+                MainFile.Logger.Warn(
+                    "Skipped failed card choice replay recovery because its timeline no longer exists.");
+                return;
+            }
+
+            CombatSnapshot replayBaseSnapshot = Checkpoints[firstChoiceIndex].Snapshot;
+            bool previousCheckpointUsesReplayBase =
+                firstChoiceIndex > 0 &&
+                ReferenceEquals(
+                    Checkpoints[firstChoiceIndex - 1].Snapshot,
+                    replayBaseSnapshot);
+
+            _timelineGeneration++;
+            ActionGenerations.Clear();
+            ClearPendingActionMetadata();
+            CardChoiceCheckpointService.InvalidateTimelineAsyncWork();
+            _isRestoring = true;
+            restoreScope.Reassert();
+            await replayBaseSnapshot.RestoreAsync(
+                validate: false,
+                cancellationToken);
+            SnapshotValidator.ValidatePlayableStateDuringRestore(state);
 
             Checkpoints.RemoveRange(
                 firstChoiceIndex,
                 Checkpoints.Count - firstChoiceIndex);
             ActionEntries.RemoveAll(entry =>
                 entry.SnapshotIndex >= firstChoiceIndex);
-            PendingEntries.Clear();
             _pendingTurnStartTurnNumber = null;
 
             if (previousCheckpointUsesReplayBase)
@@ -287,6 +383,11 @@ internal static class UndoRedoManager
         finally
         {
             _isRestoring = false;
+            if (requestId == _navigationRequestId)
+            {
+                _navigationInProgress = false;
+            }
+            restoreScope?.Dispose();
         }
     }
 
@@ -309,7 +410,9 @@ internal static class UndoRedoManager
 
     public static CombatSnapshot? CaptureCardChoiceReplayBaseSnapshot(string reason)
     {
-        if (_isRestoring || !RunManager.Instance.IsSingleplayerOrFakeMultiplayer)
+        if (_isRestoring ||
+            _navigationInProgress ||
+            !RunManager.Instance.IsSingleplayerOrFakeMultiplayer)
         {
             return null;
         }
@@ -340,12 +443,14 @@ internal static class UndoRedoManager
 
     public static int CurrentSnapshotIndex => _cursor;
     public static int SnapshotCount => Checkpoints.Count;
+    public static bool IsNavigationInProgress => _navigationInProgress;
 
     public static UndoCheckpoint? RegisterCardChoiceCheckpoint(
         CardChoiceReplayPoint replayPoint,
         CombatSnapshot? replayBaseSnapshot = null)
     {
         if (_isRestoring ||
+            _navigationInProgress ||
             (replayBaseSnapshot == null &&
              (_cursor < 0 || _cursor >= Checkpoints.Count)))
         {
@@ -390,6 +495,11 @@ internal static class UndoRedoManager
         IReadOnlyList<CardModel> selectedCards,
         AbstractModel? sourceModel)
     {
+        if (_isRestoring || _navigationInProgress)
+        {
+            return;
+        }
+
         int checkpointIndex = Checkpoints.IndexOf(checkpoint);
         if (checkpointIndex < 0)
         {
@@ -426,15 +536,30 @@ internal static class UndoRedoManager
 
     public static void BeginBranchFromCurrentCheckpoint()
     {
+        if (_isRestoring || _navigationInProgress)
+        {
+            return;
+        }
+
         TruncateTimelineAfterCursor();
     }
 
     public static void TryRestoreSnapshot(int target)
     {
-        TryRestoreTarget(target, "history click");
+        if (target < 0 || target >= Checkpoints.Count)
+        {
+            MainFile.Logger.Info(
+                $"Snapshot restore blocked via history click: target={target}, count={Checkpoints.Count}");
+            return;
+        }
+
+        RequestRestore(Checkpoints[target], "history click");
     }
 
-    private static int Capture(string reason, bool strictPlayPhase)
+    private static int Capture(
+        string reason,
+        bool strictPlayPhase,
+        bool allowTimelineBranch = false)
     {
         if (_isRestoring)
         {
@@ -450,6 +575,13 @@ internal static class UndoRedoManager
         try
         {
             StartSessionIfNeeded(state!);
+            if (_cursor < Checkpoints.Count - 1 && !allowTimelineBranch)
+            {
+                MainFile.Logger.Debug(
+                    $"Skipped automatic capture inside redo history: {reason}");
+                return -1;
+            }
+
             Stopwatch timer = Stopwatch.StartNew();
             CombatSnapshot snapshot = CombatSnapshot.Capture(state!, reason);
             timer.Stop();
@@ -482,149 +614,283 @@ internal static class UndoRedoManager
         }
     }
 
-    private static bool TryMove(int direction)
+    private static bool RequestMove(int direction)
     {
-        if (_choiceNavigationInProgress)
+        if (_navigationInProgress)
         {
-            MainFile.Logger.Info("Undo/redo input ignored while card choice navigation is settling.");
+            QueueNavigationMove(direction);
             return true;
-        }
-
-        if (CardChoiceCheckpointService.HasActiveChoice)
-        {
-            return TryMoveDuringCardChoice(direction);
-        }
-
-        if (!CanRestore(out string blockReason, out CombatState? state))
-        {
-            MainFile.Logger.Info($"Undo/redo blocked: {blockReason}");
-            return false;
-        }
-
-        StartSessionIfNeeded(state!);
-        int target = FindManualRestoreTarget(direction);
-        if (target < 0)
-        {
-            MainFile.Logger.Info($"Undo/redo blocked: no {(direction < 0 ? "undo" : "redo")} snapshot. cursor={_cursor}, count={Checkpoints.Count}");
-            return false;
-        }
-
-        return RestoreSnapshot(state!, target, direction < 0 ? "undo" : "redo");
-    }
-
-    private static bool TryMoveDuringCardChoice(int direction)
-    {
-        if (!CanCapture(strictPlayPhase: false, out string blockReason, out CombatState? state))
-        {
-            MainFile.Logger.Info($"Undo/redo blocked during card choice: {blockReason}");
-            return false;
         }
 
         int target = FindManualRestoreTarget(direction);
         if (target < 0)
         {
             MainFile.Logger.Info(
-                $"Undo/redo blocked during card choice: no {(direction < 0 ? "undo" : "redo")} snapshot.");
+                $"Undo/redo blocked: no {(direction < 0 ? "undo" : "redo")} snapshot. cursor={_cursor}, count={Checkpoints.Count}");
             return false;
         }
 
-        _choiceNavigationInProgress = true;
-        TaskHelper.RunSafely(MoveDuringCardChoiceAsync(
-            state!,
-            target,
-            direction,
-            Checkpoints[_cursor],
-            _cursor));
+        return RequestRestore(
+            Checkpoints[target],
+            direction < 0 ? "undo" : "redo");
+    }
+
+    private static bool RequestRestore(UndoCheckpoint targetCheckpoint, string source)
+    {
+        if (_navigationInProgress)
+        {
+            QueueNavigationCheckpoint(targetCheckpoint, source);
+            return true;
+        }
+
+        if (!targetCheckpoint.IsManualRestoreTarget)
+        {
+            MainFile.Logger.Info(
+                $"Snapshot restore blocked via {source}: target is not manually restorable.");
+            return false;
+        }
+
+        bool hasActiveChoice = CardChoiceCheckpointService.HasActiveChoice;
+        bool canBegin = hasActiveChoice
+            ? CanCapture(
+                strictPlayPhase: false,
+                out string blockReason,
+                out CombatState? state)
+            : CanRestore(out blockReason, out state);
+        if (!canBegin || state == null)
+        {
+            MainFile.Logger.Info(
+                $"Snapshot restore blocked via {source}: {blockReason}");
+            return false;
+        }
+
+        StartSessionIfNeeded(state);
+        if (!Checkpoints.Contains(targetCheckpoint))
+        {
+            MainFile.Logger.Info(
+                $"Snapshot restore blocked via {source}: target is not on the current timeline.");
+            return false;
+        }
+
+        _navigationInProgress = true;
+        int requestId = ++_navigationRequestId;
+        _restoreCancellation?.Cancel();
+        _restoreCancellation?.Dispose();
+        _restoreCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = _restoreCancellation.Token;
+        // Input and UI signal callbacks can run while Godot is traversing the scene
+        // tree. CallDeferred leaves that traversal without waiting for another
+        // rendered frame, so the old and restored states are never drawn in between.
+        Callable.From(() =>
+        {
+            TaskHelper.RunSafely(ProcessNavigationRequestAsync(
+                state,
+                targetCheckpoint,
+                source,
+                requestId,
+                cancellationToken));
+        })
+            .CallDeferred();
         return true;
     }
 
-    private static async Task MoveDuringCardChoiceAsync(
+    private static async Task ProcessNavigationRequestAsync(
         CombatState state,
-        int target,
-        int direction,
-        UndoCheckpoint rollbackCheckpoint,
-        int rollbackCursor)
+        UndoCheckpoint targetCheckpoint,
+        string source,
+        int requestId,
+        CancellationToken cancellationToken)
     {
+        bool wasChoiceNavigation = CardChoiceCheckpointService.HasActiveChoice;
+        bool wasHookChoiceNavigation = CardChoiceCheckpointService.IsActiveHookChoice;
+        UndoCheckpoint? rollbackCheckpoint =
+            wasChoiceNavigation && _cursor >= 0 && _cursor < Checkpoints.Count
+                ? Checkpoints[_cursor]
+                : null;
+        int rollbackCursor = _cursor;
+        RestoreExecutionScope? restoreScope = null;
+        bool dispatchQueuedNavigation = false;
         try
         {
-            await CardChoiceCheckpointService.InterruptActiveChoiceAsync();
-            if (!ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state) ||
-                !CombatManager.Instance.IsInProgress)
+            ThrowIfNavigationBecameStale(state, requestId, cancellationToken);
+            restoreScope = RestoreExecutionScope.Acquire(state);
+
+            if (!wasChoiceNavigation &&
+                (!RunManager.Instance.ActionQueueSet.IsEmpty ||
+                 RunManager.Instance.ActionExecutor.IsRunning ||
+                 RunManager.Instance.ActionExecutor.CurrentlyRunningAction != null))
             {
                 MainFile.Logger.Info(
-                    "Canceled card choice navigation because the combat changed while settling.");
+                    $"Snapshot restore canceled via {source}: action runtime changed before the navigation lock.");
                 return;
             }
 
-            RestoreSnapshot(
+            if (wasChoiceNavigation)
+            {
+                _choiceNavigationInProgress = true;
+                await CardChoiceCheckpointService.InterruptActiveChoiceAsync();
+                restoreScope.Reassert();
+                ThrowIfNavigationBecameStale(state, requestId, cancellationToken);
+            }
+
+            if (!await WaitForRestorableRuntimeAsync(
+                    state,
+                    requestId,
+                    source,
+                    cancellationToken,
+                    allowInterruptedHookPhase: wasHookChoiceNavigation))
+            {
+                return;
+            }
+
+            int target = Checkpoints.IndexOf(targetCheckpoint);
+            if (target < 0)
+            {
+                MainFile.Logger.Info(
+                    $"Snapshot restore canceled via {source}: target left the current timeline.");
+                return;
+            }
+
+            if (target == _cursor)
+            {
+                MainFile.Logger.Info(
+                    $"Snapshot restore ignored via {source}: already at snapshot {target + 1}.");
+                return;
+            }
+
+            await RestoreSnapshotAsync(
                 state,
-                target,
-                direction < 0 ? "undo from card choice" : "redo from card choice",
+                targetCheckpoint,
+                source,
                 rollbackCheckpoint,
-                rollbackCursor);
+                rollbackCursor,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            MainFile.Logger.Info($"Canceled stale snapshot navigation via {source}.");
         }
         catch (Exception ex)
         {
-            MainFile.Logger.Error($"Failed to interrupt card choice: {ex}");
+            MainFile.Logger.Error($"Snapshot navigation failed via {source}: {ex}");
         }
         finally
         {
-            _choiceNavigationInProgress = false;
+            if (requestId == _navigationRequestId)
+            {
+                _navigationInProgress = false;
+                _choiceNavigationInProgress = false;
+                dispatchQueuedNavigation =
+                    _queuedNavigationDirection.HasValue ||
+                    _queuedNavigationCheckpoint != null;
+            }
+            restoreScope?.Dispose();
+            if (dispatchQueuedNavigation)
+            {
+                Callable.From(DispatchQueuedNavigation).CallDeferred();
+            }
         }
     }
 
-    private static void TryRestoreTarget(int target, string source)
+    private static void QueueNavigationMove(int direction)
     {
-        if (!CanRestore(out string blockReason, out CombatState? state))
-        {
-            MainFile.Logger.Info($"Snapshot restore blocked via {source}: {blockReason}");
-            return;
-        }
-
-        StartSessionIfNeeded(state!);
-        if (Checkpoints.Count == 0)
-        {
-            Capture("manual-initial", strictPlayPhase: true);
-        }
-
-        if (target == _cursor)
-        {
-            MainFile.Logger.Info($"Snapshot restore ignored via {source}: already at snapshot {target + 1}.");
-            return;
-        }
-
-        if (target < 0 || target >= Checkpoints.Count)
-        {
-            MainFile.Logger.Info($"Snapshot restore blocked via {source}: target={target}, count={Checkpoints.Count}");
-            return;
-        }
-
-        if (!Checkpoints[target].IsManualRestoreTarget)
-        {
-            MainFile.Logger.Info($"Snapshot restore blocked via {source}: target snapshot is not manually restorable.");
-            return;
-        }
-
-        RestoreSnapshot(state!, target, source);
+        _queuedNavigationDirection = direction < 0 ? -1 : 1;
+        _queuedNavigationCheckpoint = null;
+        _queuedNavigationSource = direction < 0 ? "queued undo" : "queued redo";
+        MainFile.Logger.Info(
+            $"Queued the latest {(direction < 0 ? "undo" : "redo")} input behind the active restore.");
     }
 
-    private static bool RestoreSnapshot(
+    private static void QueueNavigationCheckpoint(
+        UndoCheckpoint checkpoint,
+        string source)
+    {
+        _queuedNavigationDirection = null;
+        _queuedNavigationCheckpoint = checkpoint;
+        _queuedNavigationSource = source;
+        MainFile.Logger.Info(
+            $"Queued the latest {source} request behind the active restore.");
+    }
+
+    private static void DispatchQueuedNavigation()
+    {
+        if (_navigationInProgress)
+        {
+            return;
+        }
+
+        int? direction = _queuedNavigationDirection;
+        UndoCheckpoint? checkpoint = _queuedNavigationCheckpoint;
+        string source = _queuedNavigationSource ?? "queued navigation";
+        ClearQueuedNavigation();
+
+        if (direction.HasValue)
+        {
+            RequestMove(direction.Value);
+        }
+        else if (checkpoint != null)
+        {
+            RequestRestore(checkpoint, source);
+        }
+    }
+
+    private static void ClearQueuedNavigation()
+    {
+        _queuedNavigationDirection = null;
+        _queuedNavigationCheckpoint = null;
+        _queuedNavigationSource = null;
+    }
+
+    private static async Task<bool> WaitForRestorableRuntimeAsync(
         CombatState state,
-        int target,
+        int requestId,
         string source,
-        UndoCheckpoint? rollbackCheckpoint = null,
-        int rollbackCursor = -1)
+        CancellationToken cancellationToken,
+        bool allowInterruptedHookPhase = false)
     {
-        UndoCheckpoint checkpoint = Checkpoints[target];
+        string blockReason = "runtime is not settled";
+        for (int frame = 0; frame < 240; frame++)
+        {
+            ThrowIfNavigationBecameStale(state, requestId, cancellationToken);
+            if (CanRestoreDuringNavigation(
+                    state,
+                    allowInterruptedHookPhase,
+                    out blockReason))
+            {
+                return true;
+            }
+
+            if (frame == 0 || frame == 30 || frame == 120)
+            {
+                MainFile.Logger.Info(
+                    $"Waiting to restore via {source}: {blockReason}");
+            }
+
+            await AwaitProcessFramesAsync(1, cancellationToken);
+        }
+
+        MainFile.Logger.Warn(
+            $"Snapshot restore blocked via {source}: {blockReason}");
+        return false;
+    }
+
+    private static async Task RestoreSnapshotAsync(
+        CombatState state,
+        UndoCheckpoint checkpoint,
+        string source,
+        UndoCheckpoint? rollbackCheckpoint,
+        int rollbackCursor,
+        CancellationToken cancellationToken)
+    {
         CombatSnapshot snapshot = checkpoint.Snapshot;
-        if (!snapshot.BelongsTo(state!))
+        if (!snapshot.BelongsTo(state))
         {
             MainFile.Logger.Info("Undo/redo blocked: snapshot belongs to a different combat.");
             Reset();
-            return false;
+            return;
         }
 
-        CombatSnapshot rollbackSnapshot = rollbackCheckpoint?.Snapshot!;
+        CombatSnapshot rollbackSnapshot;
         if (rollbackCheckpoint == null)
         {
             try
@@ -634,66 +900,293 @@ internal static class UndoRedoManager
             }
             catch (Exception ex)
             {
-                MainFile.Logger.Error($"Undo/redo blocked because rollback snapshot capture failed: {ex}");
-                return false;
+                MainFile.Logger.Error(
+                    $"Undo/redo blocked because rollback snapshot capture failed: {ex}");
+                return;
             }
+        }
+        else
+        {
+            rollbackSnapshot = rollbackCheckpoint.Snapshot;
         }
 
         _isRestoring = true;
         _readyCaptureRequestId++;
         _forceNextPlayerControlReadySnapshot = false;
+        _timelineGeneration++;
+        ActionGenerations.Clear();
+        ClearPendingActionMetadata();
+        CardChoiceCheckpointService.InvalidateTimelineAsyncWork();
+
+        bool restoreStarted = false;
         try
         {
             Stopwatch timer = Stopwatch.StartNew();
-            snapshot.Restore(validate: false);
+            restoreStarted = true;
+            await snapshot.RestoreAsync(validate: false, cancellationToken);
             if (checkpoint.CardChoice == null)
             {
-                SnapshotValidator.ValidatePlayableState(state);
+                SnapshotValidator.ValidatePlayableStateDuringRestore(state);
             }
             else
             {
-                SnapshotValidator.ValidateCardChoiceReplayBaseState(state);
+                SnapshotValidator.ValidateCardChoiceReplayBaseStateDuringRestore(state);
             }
+
             timer.Stop();
+            int target = Checkpoints.IndexOf(checkpoint);
+            if (target < 0)
+            {
+                throw new InvalidOperationException(
+                    "The restored checkpoint left the current timeline.");
+            }
+
             _cursor = target;
             if (checkpoint.CardChoice != null)
             {
                 CardChoiceCheckpointService.StartReplay(checkpoint.CardChoice);
             }
 
-            MainFile.Logger.Info($"Restored snapshot {_cursor + 1}/{Checkpoints.Count} via {source}: {checkpoint.Reason}");
+            MainFile.Logger.Info(
+                $"Restored snapshot {_cursor + 1}/{Checkpoints.Count} via {source}: {checkpoint.Reason}");
             if (timer.ElapsedMilliseconds >= 8)
             {
                 MainFile.Logger.Info(
                     $"Snapshot restore took {timer.ElapsedMilliseconds} ms: {snapshot.Reason}");
             }
+
             ActionHistoryOverlay.Refresh();
-            return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             MainFile.Logger.Error($"Failed to restore snapshot: {ex}");
+            if (!restoreStarted)
+            {
+                return;
+            }
+
             try
             {
-                rollbackSnapshot.Restore(validate: false);
+                await rollbackSnapshot.RestoreAsync(validate: false, cancellationToken);
                 _cursor = rollbackCursor;
                 if (rollbackCheckpoint?.CardChoice != null)
                 {
+                    SnapshotValidator.ValidateCardChoiceReplayBaseStateDuringRestore(state);
                     CardChoiceCheckpointService.StartReplay(rollbackCheckpoint.CardChoice);
                 }
+                else
+                {
+                    SnapshotValidator.ValidatePlayableStateDuringRestore(state);
+                }
 
-                MainFile.Logger.Warn("Restored the pre-operation state after snapshot restore failure.");
+                MainFile.Logger.Warn(
+                    "Restored the pre-operation state after snapshot restore failure.");
             }
             catch (Exception rollbackEx)
             {
-                MainFile.Logger.Error($"Failed to restore the pre-operation rollback snapshot: {rollbackEx}");
+                MainFile.Logger.Error(
+                    $"Failed to restore the pre-operation rollback snapshot: {rollbackEx}");
             }
-
-            return false;
         }
         finally
         {
             _isRestoring = false;
+        }
+    }
+
+    private static void ThrowIfNavigationBecameStale(
+        CombatState state,
+        int requestId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (requestId != _navigationRequestId ||
+            !CombatManager.Instance.IsInProgress ||
+            !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state) ||
+            !ReferenceEquals(_sessionState, state))
+        {
+            throw new OperationCanceledException(
+                "The combat or timeline navigation request changed.",
+                cancellationToken);
+        }
+    }
+
+    private static async Task AwaitProcessFramesAsync(
+        int count,
+        CancellationToken cancellationToken)
+    {
+        for (int frame = 0; frame < count; frame++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Engine.GetMainLoop() is SceneTree sceneTree)
+            {
+                await sceneTree.ToSignal(sceneTree, SceneTree.SignalName.ProcessFrame);
+            }
+            else
+            {
+                await Task.Delay(16, cancellationToken);
+            }
+        }
+    }
+
+    private sealed class RestoreExecutionScope : IDisposable
+    {
+        private readonly CombatState _state;
+        private readonly NPlayerHand? _hand;
+        private bool _disposed;
+
+        private RestoreExecutionScope(CombatState state, NPlayerHand? hand)
+        {
+            _state = state;
+            _hand = hand;
+        }
+
+        public static RestoreExecutionScope Acquire(CombatState state)
+        {
+            if (!ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state))
+            {
+                throw new InvalidOperationException(
+                    "Cannot acquire the restore lock for a different combat.");
+            }
+
+            NPlayerHand? hand = NPlayerHand.Instance;
+            bool managerLocked = false;
+            bool executorPaused = false;
+            bool queuesPaused = false;
+            try
+            {
+                ReflectionUtil.SetRequiredField(
+                    CombatManager.Instance,
+                    "_playerActionsDisabled",
+                    true);
+                managerLocked = CombatManager.Instance.PlayerActionsDisabled;
+                if (!managerLocked)
+                {
+                    throw new InvalidOperationException(
+                        "CombatManager refused the restore input lock.");
+                }
+
+                RunManager.Instance.ActionExecutor.Pause();
+                executorPaused = true;
+                RunManager.Instance.ActionQueueSet.PauseAllPlayerQueues();
+                queuesPaused = true;
+                if (hand != null && GodotObject.IsInstanceValid(hand))
+                {
+                    ReflectionUtil.Method(typeof(NPlayerHand), "AnimDisable")
+                        ?.Invoke(hand, null);
+                }
+
+                MainFile.Logger.Debug("Acquired restore execution lock.");
+                return new RestoreExecutionScope(state, hand);
+            }
+            catch
+            {
+                if (queuesPaused)
+                {
+                    RunManager.Instance.ActionExecutor.Unpause();
+                    RunManager.Instance.ActionQueueSet.UnpauseAllPlayerQueues();
+                    executorPaused = false;
+                }
+
+                if (executorPaused)
+                {
+                    RunManager.Instance.ActionExecutor.Unpause();
+                }
+
+                if (managerLocked)
+                {
+                    ReflectionUtil.SetField(
+                        CombatManager.Instance,
+                        "_playerActionsDisabled",
+                        false);
+                }
+
+                throw;
+            }
+        }
+
+        public void Reassert()
+        {
+            if (_disposed ||
+                !CombatManager.Instance.IsInProgress ||
+                !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), _state))
+            {
+                throw new InvalidOperationException(
+                    "Cannot reassert a stale restore execution lock.");
+            }
+
+            ReflectionUtil.SetRequiredField(
+                CombatManager.Instance,
+                "_playerActionsDisabled",
+                true);
+            RunManager.Instance.ActionExecutor.Pause();
+            RunManager.Instance.ActionQueueSet.PauseAllPlayerQueues();
+            if (_hand != null && GodotObject.IsInstanceValid(_hand))
+            {
+                ReflectionUtil.Method(typeof(NPlayerHand), "AnimDisable")
+                    ?.Invoke(_hand, null);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            if (!CombatManager.Instance.IsInProgress ||
+                !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), _state))
+            {
+                return;
+            }
+
+            try
+            {
+                ReflectionUtil.SetRequiredField(
+                    CombatManager.Instance,
+                    "_playerActionsDisabled",
+                    false);
+            }
+            catch (Exception ex)
+            {
+                MainFile.Logger.Error(
+                    $"Failed to release the CombatManager restore lock: {ex}");
+            }
+
+            try
+            {
+                if (_hand != null && GodotObject.IsInstanceValid(_hand))
+                {
+                    ReflectionUtil.Method(typeof(NPlayerHand), "AnimEnable")
+                        ?.Invoke(_hand, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                MainFile.Logger.Error($"Failed to re-enable the hand after restore: {ex}");
+            }
+
+            try
+            {
+                RunManager.Instance.ActionExecutor.Unpause();
+            }
+            catch (Exception ex)
+            {
+                MainFile.Logger.Error($"Failed to unpause the action executor: {ex}");
+            }
+
+            try
+            {
+                RunManager.Instance.ActionQueueSet.UnpauseAllPlayerQueues();
+            }
+            catch (Exception ex)
+            {
+                MainFile.Logger.Error($"Failed to unpause player action queues: {ex}");
+            }
+
+            MainFile.Logger.Debug("Released restore execution lock.");
         }
     }
 
@@ -754,7 +1247,8 @@ internal static class UndoRedoManager
         MainFile.Logger.Info($"Gave up capturing PlayerControlReady via {source}: state did not become stable.");
     }
 
-    private static void CapturePlayerControlReadySnapshot()
+    private static void CapturePlayerControlReadySnapshot(
+        bool allowTimelineBranch = false)
     {
         bool needsSnapshot = Checkpoints.Count == 0 ||
                              PendingEntries.Count > 0 ||
@@ -765,9 +1259,23 @@ internal static class UndoRedoManager
             return;
         }
 
-        int snapshotIndex = Capture("PlayerControlReady", strictPlayPhase: true);
+        bool insideRedoHistory = _cursor >= 0 && _cursor < Checkpoints.Count - 1;
+        int snapshotIndex = Capture(
+            "PlayerControlReady",
+            strictPlayPhase: true,
+            allowTimelineBranch: allowTimelineBranch);
         if (snapshotIndex < 0)
         {
+            if (insideRedoHistory && !allowTimelineBranch)
+            {
+                MainFile.Logger.Info(
+                    "Discarded stale automatic capture metadata inside redo history.");
+                ClearPendingActionMetadata();
+                _pendingTurnStartTurnNumber = null;
+                _forceNextPlayerControlReadySnapshot = false;
+                return;
+            }
+
             snapshotIndex = _cursor;
         }
 
@@ -783,6 +1291,7 @@ internal static class UndoRedoManager
             ActionEntries.Add(pending);
         }
         PendingEntries.Clear();
+        PendingEntriesByAction.Clear();
 
         AddPendingTurnStartEntry(snapshotIndex);
 
@@ -799,7 +1308,8 @@ internal static class UndoRedoManager
 
         int snapshotIndex = Capture(
             $"PlayerControlReady:before-{reason}",
-            strictPlayPhase: true);
+            strictPlayPhase: true,
+            allowTimelineBranch: true);
         if (snapshotIndex < 0)
         {
             MainFile.Logger.Info(
@@ -828,7 +1338,8 @@ internal static class UndoRedoManager
 
         int snapshotIndex = Capture(
             $"PlayerControlReady:before-first-{reason}",
-            strictPlayPhase: true);
+            strictPlayPhase: true,
+            allowTimelineBranch: true);
         if (snapshotIndex >= 0)
         {
             MainFile.Logger.Info($"Captured initial snapshot before first player action: {reason}.");
@@ -880,11 +1391,13 @@ internal static class UndoRedoManager
         return IsRuntimeSettled(out reason);
     }
 
-    private static bool IsRuntimeSettled(out string reason)
+    private static bool IsRuntimeSettled(
+        out string reason,
+        bool allowRestoreInputLock = false)
     {
         try
         {
-            return IsRuntimeSettledCore(out reason);
+            return IsRuntimeSettledCore(out reason, allowRestoreInputLock);
         }
         catch (Exception ex)
         {
@@ -894,7 +1407,9 @@ internal static class UndoRedoManager
         }
     }
 
-    private static bool IsRuntimeSettledCore(out string reason)
+    private static bool IsRuntimeSettledCore(
+        out string reason,
+        bool allowRestoreInputLock)
     {
         if (!RunManager.Instance.ActionQueueSet.IsEmpty)
         {
@@ -949,9 +1464,10 @@ internal static class UndoRedoManager
             if (CombatRuntimeStateCleanup.TryRecoverStaleRuntimeBlocker(
                     reason,
                     RuntimeBlockerKind.EffectDepth,
-                    effectDepth))
+                    effectDepth,
+                    allowRestoreInputLock))
             {
-                return IsRuntimeSettled(out reason);
+                return IsRuntimeSettled(out reason, allowRestoreInputLock);
             }
 
             return false;
@@ -966,9 +1482,10 @@ internal static class UndoRedoManager
             if (CombatRuntimeStateCleanup.TryRecoverStaleRuntimeBlocker(
                     reason,
                     RuntimeBlockerKind.ReceivedChoices,
-                    receivedChoices))
+                    receivedChoices,
+                    allowRestoreInputLock))
             {
-                return IsRuntimeSettled(out reason);
+                return IsRuntimeSettled(out reason, allowRestoreInputLock);
             }
 
             return false;
@@ -988,9 +1505,11 @@ internal static class UndoRedoManager
 
         ClearHistory();
         CardChoiceCheckpointService.Reset();
+        _timelineGeneration++;
         _pendingTurnStartTurnNumber = null;
         _forceNextPlayerControlReadySnapshot = false;
-        PendingEntries.Clear();
+        ClearPendingActionMetadata();
+        ActionGenerations.Clear();
         _sessionState = state;
         MainFile.Logger.Info("Started undo/redo session for current combat.");
         ActionHistoryOverlay.Refresh();
@@ -1001,6 +1520,12 @@ internal static class UndoRedoManager
         Checkpoints.Clear();
         ActionEntries.Clear();
         _cursor = -1;
+    }
+
+    private static void ClearPendingActionMetadata()
+    {
+        PendingEntries.Clear();
+        PendingEntriesByAction.Clear();
     }
 
     private static void TruncateTimelineAfterCursor()
@@ -1085,6 +1610,78 @@ internal static class UndoRedoManager
         }
 
         return IsRuntimeSettled(out reason);
+    }
+
+    private static bool CanRestoreDuringNavigation(
+        CombatState expectedState,
+        bool allowInterruptedHookPhase,
+        out string reason)
+    {
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (!RunManager.Instance.IsSingleplayerOrFakeMultiplayer)
+        {
+            reason = "multiplayer run";
+            return false;
+        }
+
+        if (!CombatManager.Instance.IsInProgress ||
+            state == null ||
+            !ReferenceEquals(state, expectedState))
+        {
+            reason = "combat changed";
+            return false;
+        }
+
+        if (state.CurrentSide != CombatSide.Player)
+        {
+            reason = "not player side";
+            return false;
+        }
+
+        if (state.Players.Any(player => player.PlayerCombatState == null))
+        {
+            reason = "player combat state is unavailable";
+            return false;
+        }
+
+        bool hasNonPlayPhase = state.Players.Any(player =>
+            player.PlayerCombatState!.Phase != PlayerTurnPhase.Play);
+        if (allowInterruptedHookPhase &&
+            state.Players.Any(player =>
+                player.PlayerCombatState!.Phase == PlayerTurnPhase.None))
+        {
+            reason = "interrupted turn hook has no active player phase";
+            return false;
+        }
+
+        // A turn-hook choice (Toolbox/BeforeHandDraw and the equivalent end-turn
+        // hooks) intentionally pauses outside Play. Once that choice has been
+        // interrupted and its action runtime is empty, requiring Play creates a
+        // deadlock: only the snapshot restore can advance us to the target phase.
+        if (!allowInterruptedHookPhase && hasNonPlayPhase)
+        {
+            reason = "player turn phase is not Play";
+            return false;
+        }
+
+        if (!IsRuntimeSettled(out reason, allowRestoreInputLock: true))
+        {
+            return false;
+        }
+
+        if (!allowInterruptedHookPhase &&
+            (CombatManager.Instance.EndingPlayerTurnPhaseOne ||
+             CombatManager.Instance.EndingPlayerTurnPhaseTwo) &&
+            !CombatRuntimeStateCleanup.TryClearStaleEndingTurnFlagsIfPlayerControlAvailable(
+                state,
+                allowRestoreInputLock: true))
+        {
+            reason = "ending player turn";
+            return false;
+        }
+
+        reason = "";
+        return true;
     }
 
     private static bool IsSafePlayPhase(CombatState state, out string reason)

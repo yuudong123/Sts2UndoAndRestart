@@ -46,6 +46,7 @@ This mod is distributed with `affects_gameplay=false`. Players should still be a
 ### Documentation
 
 - STS2 0.111 snapshot audit: [SNAPSHOT_AUDIT_0.111.md](SNAPSHOT_AUDIT_0.111.md)
+- STS2 0.111 restore pipeline audit: [RESTORE_PIPELINE_AUDIT.md](RESTORE_PIPELINE_AUDIT.md)
 - Previous STS2 0.110 snapshot audit: [SNAPSHOT_AUDIT_0.110.md](SNAPSHOT_AUDIT_0.110.md)
 - Previous STS2 0.109 snapshot audit: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
 - Architecture notes: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
@@ -153,6 +154,7 @@ For <최신 beta 버전> -> <해당 GitHub 릴리스 다운로드 URL>
 ### 문서
 
 - STS2 0.111 스냅샷 감사: [SNAPSHOT_AUDIT_0.111.md](SNAPSHOT_AUDIT_0.111.md)
+- STS2 0.111 복원 파이프라인 감사: [RESTORE_PIPELINE_AUDIT.md](RESTORE_PIPELINE_AUDIT.md)
 - 이전 STS2 0.110 스냅샷 감사: [SNAPSHOT_AUDIT_0.110.md](SNAPSHOT_AUDIT_0.110.md)
 - 이전 STS2 0.109 스냅샷 감사: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
 - 한국어 구조 명세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

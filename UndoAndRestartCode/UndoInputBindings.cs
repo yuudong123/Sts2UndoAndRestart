@@ -184,7 +184,7 @@ internal static class UndoInputBindings
         Dictionary<StringName, string>? titleMap =
             ReflectionUtil.GetStaticField<Dictionary<StringName, string>>(
                 typeof(NInputSettingsEntry),
-                "_commandToLocTitle");
+                "commandToLocTitle");
         if (titleMap == null)
         {
             return;

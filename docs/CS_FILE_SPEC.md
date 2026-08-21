@@ -5,7 +5,7 @@
 | 파일 | 책임 |
 | --- | --- |
 | `MainFile.cs` | 모드 초기화 진입점입니다. Harmony 패치를 등록하고 설정을 로드하며 전투 이벤트를 구독합니다. |
-| `UndoRedoPatches.cs` | Harmony 패치 모음입니다. 입력 처리, 액션 경계 감지, 입력 설정 항목 주입, 사용 기록 엔트리 생성을 담당합니다. |
+| `UndoRedoPatches.cs` | Harmony 패치 모음입니다. 입력, 액션 경계, 입력 설정, 사용 기록, 비동기 카드 VFX 소유권 등록을 담당합니다. |
 | `ModSettingsPanelPatch.cs` | 모드 정보 화면에 스냅샷 개수, 사용 기록 탭 표시, 카드 선택창 체크포인트 설정 UI를 추가합니다. |
 | `FeatureAnnouncement.cs` | 메인 메뉴 준비 후 최초 1회 기능 안내창을 표시하고 확인 여부를 저장합니다. |
 | `NecrobinderVfxSafetyPatches.cs` | `NNecrobinderVfx`의 머리 표시와 낫불꽃 콜백을 안전하게 처리합니다. 복원 중 이미 정리된 Godot 노드 때문에 VFX 콜백이 예외를 내지 않게 막습니다. |
@@ -14,13 +14,13 @@
 
 | 파일 | 책임 |
 | --- | --- |
-| `UndoRedoManager.cs` | 스냅샷 스택과 커서를 관리합니다. 캡처 가능 조건, undo/redo 이동, 턴 전환 스냅샷, 사용 기록 엔트리 연결을 처리합니다. |
-| `CardChoiceCheckpointService.cs` | 수동 카드 선택창 체크포인트를 캡처하고, 선택 중 타임라인 이동을 위해 현재 선택을 중단하며, 원래 액션을 재실행해 복원 대상 선택창을 재구성합니다. |
+| `UndoRedoManager.cs` | 스냅샷 스택, 커서, 타임라인 세대, 직렬화된 이동 게이트, 복원 실행 잠금, 턴 전환 스냅샷, 정확한 액션별 사용 기록 연결을 관리합니다. |
+| `CardChoiceCheckpointService.cs` | 수동 카드 선택창 체크포인트를 캡처하고 오래된 선택기 세대를 무효화하며, 선택 중 타임라인 이동을 위해 현재 선택을 중단하고 원래 액션을 재실행합니다. |
 | `ObjectGraphSnapshot.cs` | 임의 객체의 필드 그래프를 reflection으로 깊은 복제하고 같은 루트 객체에 복원합니다. 중첩된 mutable `AbstractModel` 탐색과 `Rng`, `CardEnergyCost`, `DynamicVarSet`, 컬렉션 복원도 담당합니다. |
-| `CombatSnapshot.cs` | 핵심 전투 스냅샷입니다. 크리처, 플레이어, 모델, 카드, 더미, 포션, 유물, 오브, 전투 히스토리, UI 상태를 캡처하고 복원하며 카드 UI 갱신 신호도 보냅니다. |
+| `CombatSnapshot.cs` | 핵심 전투 스냅샷입니다. 외부 실행 잠금을 유지하면서 이전 프레젠테이션 세대를 격리하고 크리처, 플레이어, 모델, 카드, 더미, 포션, 유물, 오브, 히스토리, UI를 다음 렌더 전에 복원합니다. |
 | `RunStateSnapshot.cs` | 전투 중에도 영향을 받는 런 상태 일부를 저장하고 복원합니다. |
 | `RunHistorySnapshot.cs` | undo/restart가 런 기록과 피해 통계에 누적 오염을 만들지 않도록 런 히스토리를 저장하고 복원합니다. |
-| `CombatVisualSnapshot.cs` | 크리처 위치, 표시 상태, Spine 애니메이션 같은 전투 시각 상태를 저장하고 복원합니다. |
+| `CombatVisualSnapshot.cs` | 크리처 위치와 형태·루프·종료 포즈 같은 의미 기반 시각 상태를 복원하며, 애니메이션 재생 시간은 복원하지 않습니다. |
 | `SnapshotValidator.cs` | 복원 후 손패 홀더/더미/전투 카드 목록/타게팅이 플레이 가능한 상태인지 검사하고, 불변식 위반 시 복원 롤백을 유도합니다. |
 
 ## UI와 입력
@@ -38,9 +38,9 @@
 | 파일 | 책임 |
 | --- | --- |
 | `CombatRuntimeStateCleanup.cs` | 복원이나 F5 재시작 후 남을 수 있는 전투 런타임 플래그, 액션 blocker, 턴 종료 상태를 정리합니다. |
-| `TransientCardVfxCleanup.cs` | 카드 사용/생성 중 화면 중앙에 남은 일시 카드 노드와 선택 트윈을 정리합니다. |
+| `TransientCardVfxCleanup.cs` | 비동기 카드 VFX 소유자를 추적하고 이전 타임라인 노드를 즉시 숨겨 격리하며, `NodePool` 소유권을 어기지 않도록 나머지 일시 카드 노드를 안전하게 반납합니다. |
 | `SovereignBladeVfxSync.cs` | 군주의 칼날처럼 별도 VFX가 카드 개수와 동기화되어야 하는 카드를 복원 상태에 맞춰 정리합니다. |
-| `ParkedCreatureNodeRegistry.cs` | 복원 중 일시적으로 전투 목록에서 빠져야 하는 `NCreature` 노드를 숨겨서 보관하고, 다시 필요해지면 전투방 목록에 되돌립니다. |
+| `CreaturePresentationLifecycle.cs` | 되감을 수 없는 사망 애니메이션 노드를 엔진 취소 경계에서 폐기하고, 복원 후 새 프레젠테이션 노드로 재생성되게 합니다. |
 | `ReflectionUtil.cs` | private 필드와 메소드 접근을 단일 경로로 모읍니다. 게임 업데이트 시 reflection 실패 지점을 추적하기 쉽게 합니다. |
 
 ## F5 재시작
