@@ -5,7 +5,7 @@
 | File | Responsibility |
 | --- | --- |
 | `MainFile.cs` | Mod initialization entry point. Registers Harmony patches, loads config, and subscribes to combat events. |
-| `UndoRedoPatches.cs` | Central Harmony patch collection. Handles input, action boundary detection, input settings injection, and action-history entry creation. |
+| `UndoRedoPatches.cs` | Central Harmony patch collection. Handles input, action boundaries, input settings, history entries, and registration of asynchronous card VFX ownership. |
 | `ModSettingsPanelPatch.cs` | Adds snapshot count, action-history visibility, and card-selection checkpoint settings to the mod info screen. |
 | `FeatureAnnouncement.cs` | Shows the one-time feature announcement after the main menu becomes ready and persists its acknowledgement. |
 | `NecrobinderVfxSafetyPatches.cs` | Patches `NNecrobinderVfx` head visibility and scythe flame callbacks so disposed Godot nodes do not throw during restore cleanup. |
@@ -14,13 +14,13 @@
 
 | File | Responsibility |
 | --- | --- |
-| `UndoRedoManager.cs` | Owns the snapshot stack and cursor. Handles capture eligibility, undo/redo movement, turn-transition snapshots, and action-history linking. |
-| `CardChoiceCheckpointService.cs` | Captures manual card-selection checkpoints, interrupts an active selection for timeline navigation, and replays the originating action to reconstruct a restored selection screen. |
+| `UndoRedoManager.cs` | Owns the snapshot stack, cursor, timeline generations, serialized navigation gate, restore execution lock, turn-transition snapshots, and exact action-history linking. |
+| `CardChoiceCheckpointService.cs` | Captures manual card-selection checkpoints, invalidates stale selector generations, interrupts an active selection for timeline navigation, and replays the originating action to reconstruct a restored selection screen. |
 | `ObjectGraphSnapshot.cs` | Deep-clones and restores an arbitrary object's field graph through reflection. It also discovers nested mutable `AbstractModel` instances and restores `Rng`, `CardEnergyCost`, `DynamicVarSet`, and collections. |
-| `CombatSnapshot.cs` | Core combat snapshot implementation. Captures and restores creatures, players, models, cards, piles, potions, relics, orbs, combat history, and UI state, then sends card UI refresh notifications. |
+| `CombatSnapshot.cs` | Core combat snapshot implementation. Quarantines the abandoned presentation generation and restores creatures, players, models, cards, piles, potions, relics, orbs, history, and UI before the next render while preserving the outer execution lock. |
 | `RunStateSnapshot.cs` | Stores and restores run-state fields that can be affected during combat. |
 | `RunHistorySnapshot.cs` | Stores and restores run history so undo/restart does not accumulate incorrect damage or statistic records. |
-| `CombatVisualSnapshot.cs` | Stores and restores creature positions, visibility, and visual animation state. |
+| `CombatVisualSnapshot.cs` | Restores creature position and semantic form/loop/terminal-pose state without restoring animation playback time. |
 | `SnapshotValidator.cs` | Validates hand holders, piles, combat card lists, and targeting after restore, triggering rollback when an invariant fails. |
 
 ## UI and Input
@@ -38,9 +38,9 @@
 | File | Responsibility |
 | --- | --- |
 | `CombatRuntimeStateCleanup.cs` | Clears leftover runtime flags, action blockers, and turn-ending state after restore or F5 restart. |
-| `TransientCardVfxCleanup.cs` | Removes temporary card nodes and selection tweens left by card play or card generation animations. |
+| `TransientCardVfxCleanup.cs` | Tracks async card-VFX owners, immediately hides and quarantines old-timeline nodes, and safely retires the remaining temporary card nodes without violating `NodePool` ownership. |
 | `SovereignBladeVfxSync.cs` | Keeps Sovereign Blade-style floating VFX synchronized with the restored card count. |
-| `ParkedCreatureNodeRegistry.cs` | Temporarily hides and removes `NCreature` nodes from the combat room lists, then restores them when the creature becomes active again. |
+| `CreaturePresentationLifecycle.cs` | Retires non-rewindable death-animation nodes at the engine cancellation boundary so clean presentation nodes can be created after restore. |
 | `ReflectionUtil.cs` | Centralizes private field and method access so reflection failures are easier to audit after game updates. |
 
 ## F5 Restart

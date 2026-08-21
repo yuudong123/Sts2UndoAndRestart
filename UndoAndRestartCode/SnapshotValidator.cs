@@ -2,10 +2,12 @@ using System.Collections;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace UndoAndRestartCode;
@@ -14,17 +16,41 @@ internal static class SnapshotValidator
 {
     public static void ValidatePlayableState(CombatState state)
     {
-        ValidateRestoredState(state, requirePlayerControl: true);
+        ValidateRestoredState(
+            state,
+            requirePlayerControl: true,
+            allowRestoreLock: false);
     }
 
     public static void ValidateCardChoiceReplayBaseState(CombatState state)
     {
-        ValidateRestoredState(state, requirePlayerControl: false);
+        ValidateRestoredState(
+            state,
+            requirePlayerControl: false,
+            allowRestoreLock: false);
+    }
+
+    public static void ValidatePlayableStateDuringRestore(CombatState state)
+    {
+        ValidateRestoredState(
+            state,
+            requirePlayerControl: true,
+            allowRestoreLock: true);
+    }
+
+    public static void ValidateCardChoiceReplayBaseStateDuringRestore(
+        CombatState state)
+    {
+        ValidateRestoredState(
+            state,
+            requirePlayerControl: false,
+            allowRestoreLock: true);
     }
 
     private static void ValidateRestoredState(
         CombatState state,
-        bool requirePlayerControl)
+        bool requirePlayerControl,
+        bool allowRestoreLock)
     {
         List<string> errors = new();
         HashSet<CardModel> runCards = ReflectionUtil
@@ -86,6 +112,8 @@ internal static class SnapshotValidator
             errors.Add("Combat creature IDs are not unique.");
         }
 
+        ValidateCreaturePresentations(state, errors);
+
         if (!RunManager.Instance.ActionQueueSet.IsEmpty)
         {
             errors.Add("Action queue is not empty after restore.");
@@ -99,7 +127,11 @@ internal static class SnapshotValidator
             errors.Add("Card or potion effect depth is non-zero after restore.");
         }
 
-        ValidatePlayerControlState(state, errors, requirePlayerControl);
+        ValidatePlayerControlState(
+            state,
+            errors,
+            requirePlayerControl,
+            allowRestoreLock);
 
         if (errors.Count == 0)
         {
@@ -111,17 +143,71 @@ internal static class SnapshotValidator
         throw new InvalidOperationException(message);
     }
 
+    private static void ValidateCreaturePresentations(
+        CombatState state,
+        List<string> errors)
+    {
+        NCombatRoom? room = NCombatRoom.Instance;
+        if (room == null)
+        {
+            errors.Add("The combat room presentation is missing after restore.");
+            return;
+        }
+
+        List<NCreature> nodes = room.CreatureNodes
+            .Where(GodotObject.IsInstanceValid)
+            .ToList();
+        foreach (IGrouping<Creature, NCreature> duplicate in nodes
+                     .GroupBy(node => node.Entity)
+                     .Where(group => group.Count() > 1))
+        {
+            errors.Add($"{duplicate.Key.LogName} has multiple active creature nodes.");
+        }
+
+        foreach (Creature creature in state.Creatures)
+        {
+            NCreature? node = room.GetCreatureNode(creature);
+            if (node == null || !GodotObject.IsInstanceValid(node))
+            {
+                errors.Add($"{creature.LogName} has no active creature node.");
+                continue;
+            }
+
+            if (node.IsQueuedForDeletion())
+            {
+                errors.Add($"{creature.LogName}'s active creature node is queued for deletion.");
+            }
+
+            if (creature.IsAlive && node.DeathAnimationTask != null)
+            {
+                errors.Add($"{creature.LogName}'s restored node still owns a death animation task.");
+            }
+        }
+    }
+
     private static void ValidatePlayerControlState(
         CombatState state,
         List<string> errors,
-        bool requirePlayerControl)
+        bool requirePlayerControl,
+        bool allowRestoreLock)
     {
         if (state.CurrentSide != CombatSide.Player)
         {
             return;
         }
 
-        if (requirePlayerControl && CombatManager.Instance.PlayerActionsDisabled)
+        // During restore, the manager and hand locks are expected to remain held
+        // until validation finishes. Outside restore, playable snapshots require
+        // those locks to be released. Keep the two modes in separate branches so
+        // a correctly held restore lock cannot fall through as a control failure.
+        if (allowRestoreLock)
+        {
+            if (!CombatManager.Instance.PlayerActionsDisabled)
+            {
+                errors.Add("The player-action restore lock was released during validation.");
+            }
+        }
+        else if (requirePlayerControl && CombatManager.Instance.PlayerActionsDisabled)
         {
             errors.Add("Player actions remain disabled after restore.");
         }
@@ -159,7 +245,15 @@ internal static class SnapshotValidator
             errors.Add("The hand remains in peek mode after restore.");
         }
 
-        if (ReflectionUtil.GetRequiredField<bool>(hand, "_isDisabled"))
+        bool handDisabled = ReflectionUtil.GetRequiredField<bool>(hand, "_isDisabled");
+        if (allowRestoreLock)
+        {
+            if (!handDisabled)
+            {
+                errors.Add("The hand restore lock was released during validation.");
+            }
+        }
+        else if (handDisabled)
         {
             errors.Add("The hand remains disabled after restore.");
         }
@@ -206,7 +300,7 @@ internal static class SnapshotValidator
             errors.Add("The selected-card container still contains hand cards after restore.");
         }
 
-        if (requirePlayerControl)
+        if (requirePlayerControl && !allowRestoreLock)
         {
             bool canPlayCards =
                 (bool)(ReflectionUtil.Method(typeof(NPlayerHand), "CanPlayCards")!

@@ -20,6 +20,8 @@ UndoRedoPatches
 UndoRedoManager
   -> Owns the snapshot stack
   -> Tracks the undo/redo cursor
+  -> Serializes navigation and owns the restore execution lock
+  -> Invalidates callbacks from abandoned timeline generations
   -> Captures snapshots at stable player-control and optional card-selection boundaries
 
 CardChoiceCheckpointService
@@ -43,7 +45,8 @@ FloorRestartService
 3. Stability is checked again from boundaries such as `ActionExecutor.AfterActionFinished`, `ActionQueueSynchronizer.PlayPhase`, and `CombatManager.PlayerActionsDisabledChanged`.
 4. Once the game is actually capturable, `CombatSnapshot.Capture` stores the current state.
 5. No partial state fingerprint is used. Actions that only change relic counters or mod-owned internal fields still receive independent snapshots.
-6. If a new action is taken while a redo branch exists, snapshots and action-history entries after the current cursor are removed.
+6. Action completion metadata is keyed by the exact `GameAction` and accepted only from the current timeline generation.
+7. Automatic ready callbacks cannot remove a redo branch. A redo branch is truncated only when the player performs a new action or makes a new replayed choice.
 
 When card-selection checkpoints are enabled, manual selection requests create an
 additional boundary. Automatic one-card resolutions are skipped. Restoring one of
@@ -53,19 +56,25 @@ suppressed so they cannot fork or truncate the existing timeline.
 
 ## Restore Flow
 
-`UndoRedoManager` captures the current state as a rollback snapshot immediately before calling `CombatSnapshot.Restore`. If the target restore or validation fails, it restores that rollback snapshot.
+`UndoRedoManager` processes one navigation request at a time. The input callback uses `CallDeferred` to leave scene-tree traversal without waiting for another rendered frame, then locks player input and the hand and pauses the executor and all player queues. It interrupts an active card choice when necessary and waits only while the action runtime genuinely owns work. An additional direction input received during navigation replaces the single queued request instead of being discarded. It then captures a rollback snapshot immediately before calling `CombatSnapshot.RestoreAsync`. If the target restore or validation fails, it restores that rollback snapshot under the same lock.
 
-`CombatSnapshot.Restore` restores state in this order:
+`CombatSnapshot.RestoreAsync` restores state in this order:
 
-1. Clears transient card VFX, such as cards floating in the center of the screen.
-2. Restores creature lifecycle state and combat participant lists.
-3. Restores run state and model field snapshots.
-4. Restores combat fields, player state, card piles, potions, relics, and orbs.
-5. Restores combat history and run history.
-6. Sends card UI refresh notifications and clears transient relic activation display state.
-7. Refreshes UI and runs snapshot validation.
+1. Immediately hides and quarantines tracked old-timeline asynchronous card VFX owners and their card nodes. Their tasks finish against the isolated nodes without blocking restore.
+2. Clears the remaining transient card VFX and synchronously detaches creature nodes whose old-timeline death tasks require the engine cancellation boundary.
+3. Restores creature lifecycle state and combat participant lists. Any needed replacement creature nodes are created only after all model restoration is complete.
+4. Restores run state and model field snapshots.
+5. Restores combat fields, player state, card piles, potions, relics, and orbs.
+6. Restores combat history and run history.
+7. Sends card UI refresh notifications and clears transient relic activation display state.
+8. Synchronously detaches stale play UI, rebuilds the hand before the same render, and snaps its layout and interaction state.
+9. Awaits enemy intent refresh tasks, then runs snapshot validation.
 
-The restore process intentionally reuses live objects instead of using the game's normal save/load path. Because of that, Godot nodes, Spine animations, card play nodes, potion holders, relic holders, and other UI state need explicit cleanup and refresh logic.
+The restore process intentionally reuses live objects instead of using the game's normal save/load path. Because of that, Godot nodes, Spine animations, card play nodes, potion holders, relic holders, and other UI state need explicit cleanup and refresh logic. Pooled nodes must be retired with `QueueFreeSafely`; direct `QueueFree` is forbidden in restore cleanup.
+
+Creature animation playback time is not snapshot state. One-shot track-0 hit, attack, and death motions are discarded and normalized to a stable state. Looping tracks restore only their animation identity. When a one-shot transition already has a loop queued behind it, the final queued loop is captured as the semantic destination instead of preserving the transition frame. Completed persistent poses on higher tracks restore at their semantic endpoint. Position, form VFX, scale, and hue remain restorable presentation values; tween progress and exact Spine frames do not.
+
+Assigning `null` to `NCreature.DeathAnimationTask` does not cancel a running `AnimDie`. Nodes with death work are therefore detached before model mutation. Their `_ExitTree` cancels `DeathAnimCancelToken` and unsubscribes from the live power and combat events. A fresh `NCreature` is projected from the same logical `Creature` after restore, preventing callbacks from the abandoned timeline from hiding its health bar or freeing it later.
 
 ## F5 Floor Restart Flow
 
@@ -104,6 +113,9 @@ The manifest uses `affects_gameplay=false` so players can still enter multiplaye
 
 - STS2 internal fields: reflected field names and types should be rechecked after game updates.
 - Action stabilization timing: card play, card generation, potion use, and end-turn boundaries should still capture only after player control is restored.
+- Async VFX ownership: compare every fire-and-forget card VFX task and delayed cleanup against `TransientCardVfxCleanup` after an update.
+- Restore locking: verify that synchronizer state changes do not unpause the executor or player queues inside restore.
+- Timeline callbacks: action and card-choice callbacks must carry a generation and must not branch from abandoned history.
 - Card cost and runtime state: cost-changing effects, this-turn-only costs, and card UI refresh should restore together.
 - Relic stack display: restored model values and UI display values should refresh to the same state.
 - Rewards and run history: F5 restart and undo should not leave accumulated changes in statistics, damage records, or reward calculations.

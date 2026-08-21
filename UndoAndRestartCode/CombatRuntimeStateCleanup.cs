@@ -36,9 +36,12 @@ internal static class CombatRuntimeStateCleanup
             "<PlayersReadyToBeginEnemyTurn>k__BackingField").Clear();
     }
 
-    public static bool TryClearStaleEndingTurnFlagsIfPlayerControlAvailable(CombatState state)
+    public static bool TryClearStaleEndingTurnFlagsIfPlayerControlAvailable(
+        CombatState state,
+        bool allowRestoreInputLock = false)
     {
-        if (!CanTreatCurrentStateAsPlayable(state) || HasPendingRuntimeWork())
+        if (!CanTreatCurrentStateAsPlayable(state, allowRestoreInputLock) ||
+            HasPendingRuntimeWork())
         {
             return false;
         }
@@ -91,9 +94,10 @@ internal static class CombatRuntimeStateCleanup
     public static bool TryRecoverStaleRuntimeBlocker(
         string reason,
         RuntimeBlockerKind kind,
-        object blocker)
+        object blocker,
+        bool allowRestoreInputLock = false)
     {
-        if (!CanConsiderRuntimeBlockerStale())
+        if (!CanConsiderRuntimeBlockerStale(allowRestoreInputLock))
         {
             ResetRuntimeBlockerObservation();
             return false;
@@ -151,11 +155,13 @@ internal static class CombatRuntimeStateCleanup
         return true;
     }
 
-    private static bool CanConsiderRuntimeBlockerStale()
+    private static bool CanConsiderRuntimeBlockerStale(
+        bool allowRestoreInputLock)
     {
         CombatState? state = CombatManager.Instance.DebugOnlyGetState();
         if (state == null ||
-            !CanTreatCurrentStateAsPlayable(state) || HasImmediateRuntimeWork())
+            !CanTreatCurrentStateAsPlayable(state, allowRestoreInputLock) ||
+            HasImmediateRuntimeWork())
         {
             return false;
         }
@@ -171,11 +177,13 @@ internal static class CombatRuntimeStateCleanup
         }
     }
 
-    private static bool CanTreatCurrentStateAsPlayable(CombatState state)
+    private static bool CanTreatCurrentStateAsPlayable(
+        CombatState state,
+        bool allowRestoreInputLock = false)
     {
         return CombatManager.Instance.IsInProgress &&
                state.CurrentSide == CombatSide.Player &&
-               !CombatManager.Instance.PlayerActionsDisabled &&
+               (allowRestoreInputLock || !CombatManager.Instance.PlayerActionsDisabled) &&
                !CombatManager.Instance.EndingPlayerTurnPhaseOne &&
                !CombatManager.Instance.EndingPlayerTurnPhaseTwo &&
                state.Players.All(player => player.PlayerCombatState?.Phase == PlayerTurnPhase.Play);

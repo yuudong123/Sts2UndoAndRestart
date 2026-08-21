@@ -1,6 +1,7 @@
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Localization.Fonts;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Nodes.Screens.ModdingScreen;
 
@@ -28,7 +29,7 @@ internal static class ModSettingsPanelPatch
         if (old != null && GodotObject.IsInstanceValid(old))
         {
             container.RemoveChild(old);
-            old.QueueFree();
+            old.QueueFreeSafely();
         }
     }
 

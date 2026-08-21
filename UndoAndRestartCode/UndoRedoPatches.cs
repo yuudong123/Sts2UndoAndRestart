@@ -9,12 +9,14 @@ using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Cards;
 using MegaCrit.Sts2.addons.mega_text;
 
 namespace UndoAndRestartCode;
@@ -302,8 +304,155 @@ internal static class UndoRedoPatches
         }
 
         __instance.Visible = false;
-        __instance.QueueFree();
+        __instance.QueueFreeSafely();
         return false;
+    }
+
+    [HarmonyPatch(typeof(NCardExhaustQuickVfx), nameof(NCardExhaustQuickVfx.PlayAnimation))]
+    [HarmonyPostfix]
+    private static void TrackQuickExhaustAnimation(
+        NCardExhaustQuickVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardExhaustVfx), nameof(NCardExhaustVfx.PlayAnimation))]
+    [HarmonyPostfix]
+    private static void TrackExhaustAnimation(
+        NCardExhaustVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardExhaustVfx), "DelayedFree")]
+    [HarmonyPostfix]
+    private static void TrackExhaustDelayedFree(
+        NCardExhaustVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardRemoveVfx), "PlayAnimation")]
+    [HarmonyPostfix]
+    private static void TrackRemoveAnimation(
+        NCardRemoveVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardTransformShineVfx), nameof(NCardTransformShineVfx.PlayUntilCardUpdate))]
+    [HarmonyPostfix]
+    private static void TrackTransformUntilUpdate(
+        NCardTransformShineVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardTransformShineVfx), nameof(NCardTransformShineVfx.PlayShineAndReveal))]
+    [HarmonyPostfix]
+    private static void TrackTransformReveal(
+        NCardTransformShineVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardTransformShineVfx), "AnimatingCardScale")]
+    [HarmonyPostfix]
+    private static void TrackTransformScale(
+        NCardTransformShineVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardFlyVfx), "PlayAnim")]
+    [HarmonyPostfix]
+    private static void TrackCardFlyAnimation(
+        NCardFlyVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardFlyShuffleVfx), "PlayAnim")]
+    [HarmonyPostfix]
+    private static void TrackCardShuffleAnimation(
+        NCardFlyShuffleVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardTrailVfx), nameof(NCardTrailVfx.FadeOut))]
+    [HarmonyPostfix]
+    private static void TrackCardTrailFade(
+        NCardTrailVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardFlyPowerVfx), nameof(NCardFlyPowerVfx.PlayAnim))]
+    [HarmonyPostfix]
+    private static void TrackCardFlyPowerAnimation(
+        NCardFlyPowerVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardEnchantVfx), "PlayAnimation")]
+    [HarmonyPostfix]
+    private static void TrackCardEnchantAnimation(
+        NCardEnchantVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardTransformVfx), "PlayAnimation")]
+    [HarmonyPostfix]
+    private static void TrackCardTransformAnimation(
+        NCardTransformVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardUpgradeVfx), "PlayAnimation")]
+    [HarmonyPostfix]
+    private static void TrackCardUpgradeAnimation(
+        NCardUpgradeVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(typeof(NCardSmithVfx), "PlayAnimation", new Type[] { })]
+    [HarmonyPostfix]
+    private static void TrackCardSmithAnimation(
+        NCardSmithVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
+    }
+
+    [HarmonyPatch(
+        typeof(NCardSmithVfx),
+        "PlayAnimation",
+        new[] { typeof(IEnumerable<CardModel>) })]
+    [HarmonyPostfix]
+    private static void TrackCardSmithCollectionAnimation(
+        NCardSmithVfx __instance,
+        ref Task __result)
+    {
+        __result = TransientCardVfxCleanup.TrackAsync(__result, __instance);
     }
 
     [HarmonyPatch(typeof(CardSelectCmd), nameof(CardSelectCmd.FromChooseACardScreen),
@@ -514,16 +663,20 @@ internal static class UndoRedoPatches
 
     [HarmonyPatch(typeof(PlayCardAction), "ExecuteAction")]
     [HarmonyPrefix]
-    private static void BeforePlayCard()
+    private static void BeforePlayCard(PlayCardAction __instance)
     {
-        UndoRedoManager.CaptureBeforeAction("PlayCardAction");
+        UndoRedoManager.CaptureBeforeAction(__instance, "PlayCardAction");
     }
 
     [HarmonyPatch(typeof(PlayCardAction), "ExecuteAction")]
     [HarmonyPostfix]
     private static void AfterPlayCard(PlayCardAction __instance, ref Task __result)
     {
-        __result = UndoRedoManager.CaptureAfterActionAsync(__result, "PlayCardAction", CreateCardEntry(__instance));
+        __result = UndoRedoManager.CaptureAfterActionAsync(
+            __result,
+            __instance,
+            "PlayCardAction",
+            CreateCardEntry(__instance));
     }
 
     [HarmonyPatch(typeof(UsePotionAction), "ExecuteAction")]
@@ -533,7 +686,7 @@ internal static class UndoRedoPatches
         if (__instance.WasEnqueuedInCombat)
         {
             PotionEntries[__instance] = CreatePotionEntry(__instance);
-            UndoRedoManager.CaptureBeforeAction("UsePotionAction");
+            UndoRedoManager.CaptureBeforeAction(__instance, "UsePotionAction");
         }
     }
 
@@ -545,7 +698,11 @@ internal static class UndoRedoPatches
         {
             PotionEntries.TryGetValue(__instance, out ActionHistoryEntry? entry);
             PotionEntries.Remove(__instance);
-            __result = UndoRedoManager.CaptureAfterActionAsync(__result, "UsePotionAction", entry);
+            __result = UndoRedoManager.CaptureAfterActionAsync(
+                __result,
+                __instance,
+                "UsePotionAction",
+                entry);
         }
     }
 
@@ -556,7 +713,7 @@ internal static class UndoRedoPatches
         if (__instance.WasEnqueuedInCombat)
         {
             DiscardPotionEntries[__instance] = CreateDiscardPotionEntry(__instance);
-            UndoRedoManager.CaptureBeforeAction("DiscardPotionGameAction");
+            UndoRedoManager.CaptureBeforeAction(__instance, "DiscardPotionGameAction");
         }
     }
 
@@ -568,15 +725,19 @@ internal static class UndoRedoPatches
         {
             DiscardPotionEntries.TryGetValue(__instance, out ActionHistoryEntry? entry);
             DiscardPotionEntries.Remove(__instance);
-            __result = UndoRedoManager.CaptureAfterActionAsync(__result, "DiscardPotionGameAction", entry);
+            __result = UndoRedoManager.CaptureAfterActionAsync(
+                __result,
+                __instance,
+                "DiscardPotionGameAction",
+                entry);
         }
     }
 
     [HarmonyPatch(typeof(EndPlayerTurnAction), "ExecuteAction")]
     [HarmonyPrefix]
-    private static void BeforeEndTurn()
+    private static void BeforeEndTurn(EndPlayerTurnAction __instance)
     {
-        UndoRedoManager.CaptureBeforeAction("EndPlayerTurnAction");
+        UndoRedoManager.CaptureBeforeAction(__instance, "EndPlayerTurnAction");
         UndoRedoManager.PrepareNextTurnStartEntry();
     }
 

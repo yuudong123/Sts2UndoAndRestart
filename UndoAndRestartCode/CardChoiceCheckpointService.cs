@@ -58,8 +58,13 @@ internal static class CardChoiceCheckpointService
     private static IOverlayScreen? _activeReplayOverlay;
     private static bool _isReplayingBeforeTargetChoice;
     private static int _replayVisualGeneration;
+    private static int _timelineGeneration;
 
     public static bool HasActiveChoice => _activeReplay != null || _activeOriginalAction != null;
+    public static bool IsActiveHookChoice =>
+        _activeReplay?.ReplayPoint.Sequence.IsHookReplay == true ||
+        (_activeHookChoiceRecording != null &&
+         _activeOriginalAction is GenericHookGameAction);
     public static bool IsReplayingBeforeTargetChoice => _isReplayingBeforeTargetChoice;
 
     public static void Reset()
@@ -76,7 +81,29 @@ internal static class CardChoiceCheckpointService
         _activeHookChoiceRecording = null;
         _isReplayingBeforeTargetChoice = false;
         _replayVisualGeneration++;
+        _timelineGeneration++;
         OriginalSequences.Clear();
+    }
+
+    public static void InvalidateTimelineAsyncWork()
+    {
+        _timelineGeneration++;
+        _activeReplay?.RequestInterruption();
+        _activeHookReplaySession?.RequestInterruption();
+        _preparedRequest = null;
+        _activeOriginalChoice = null;
+        _activeOriginalAction = null;
+        _activeHookChoiceRecording = null;
+        _isReplayingBeforeTargetChoice = false;
+        _replayVisualGeneration++;
+        OriginalSequences.Clear();
+    }
+
+    public static int CurrentTimelineGeneration => _timelineGeneration;
+
+    public static bool IsCurrentTimelineGeneration(int generation)
+    {
+        return generation == _timelineGeneration;
     }
 
     public static void PrepareChoiceRequest(CardChoiceRequest request)
@@ -105,6 +132,7 @@ internal static class CardChoiceCheckpointService
     {
         GameAction action = choiceContext.Action;
         if (_activeReplay != null ||
+            !UndoRedoManager.IsActionFromCurrentTimeline(action) ||
             action is not PlayCardAction &&
             action is not UsePotionAction { WasEnqueuedInCombat: true })
         {
@@ -169,7 +197,8 @@ internal static class CardChoiceCheckpointService
 
         HookChoiceRecording recording = new(
             CardChoiceReplaySequence.FromTurnStart(state, player),
-            replayBaseSnapshot);
+            replayBaseSnapshot,
+            _timelineGeneration);
         _activeHookChoiceRecording = recording;
         return recording;
     }
@@ -197,7 +226,8 @@ internal static class CardChoiceCheckpointService
 
         HookChoiceRecording recording = new(
             CardChoiceReplaySequence.FromTurnEnd(state, localPlayer),
-            replayBaseSnapshot);
+            replayBaseSnapshot,
+            _timelineGeneration);
         _activeHookChoiceRecording = recording;
         return recording;
     }
@@ -206,13 +236,15 @@ internal static class CardChoiceCheckpointService
         Task original,
         HookChoiceRecording recording)
     {
+        int generation = recording.TimelineGeneration;
         try
         {
             await original;
         }
         finally
         {
-            if (ReferenceEquals(_activeHookChoiceRecording, recording))
+            if (generation == _timelineGeneration &&
+                ReferenceEquals(_activeHookChoiceRecording, recording))
             {
                 _activeHookChoiceRecording = null;
                 _preparedRequest = null;
@@ -241,7 +273,9 @@ internal static class CardChoiceCheckpointService
 
         HookChoiceRecording? recording = _activeHookChoiceRecording;
         CardChoiceRequest? request = ConsumePreparedRequest();
-        if (recording == null || request == null)
+        if (recording == null ||
+            recording.TimelineGeneration != _timelineGeneration ||
+            request == null)
         {
             return;
         }
@@ -318,7 +352,16 @@ internal static class CardChoiceCheckpointService
             throw new InvalidOperationException("Another card selector is active.");
         }
 
-        ReplayCardSelector selector = new(replayPoint);
+        // RestoreExecutionScope deliberately disables the hand while the snapshot is
+        // being installed. Card-choice replay starts before that scope is disposed,
+        // so its Y=100 disable tween would otherwise be classified as an old tween
+        // and survive replay fast-forward. The later enable tween reaches Y=0 first,
+        // then the stale disable tween wins 0.2 seconds later and shifts the entire
+        // hand selector (cards, prompt, and backstop) down. Canonicalize the hand root
+        // before taking the replay tween baseline so no restore-owned tween can race it.
+        StabilizeHandRootTransitionForReplay();
+
+        ReplayCardSelector selector = new(replayPoint, _timelineGeneration);
         IDisposable selectorScope = CardSelectCmd.UseSelector(
             selector,
             localOnly: replayPoint.Sequence.IsHookReplay);
@@ -358,10 +401,11 @@ internal static class CardChoiceCheckpointService
     private static void OnReplayActionFinished(GameAction action)
     {
         CardChoiceReplayPoint? replayPoint = _activeReplay?.ReplayPoint;
+        bool wasInterrupted = _activeReplay?.IsInterruptionRequested == true;
         Exception? replayException = action.Exception;
         FinishReplay(action);
 
-        if (replayPoint != null && replayException != null)
+        if (!wasInterrupted && replayPoint != null && replayException != null)
         {
             UndoRedoManager.ScheduleFailedCardChoiceReplayRecovery(
                 replayPoint,
@@ -387,6 +431,15 @@ internal static class CardChoiceCheckpointService
                 UndoRedoManager.RequestForcedPlayerControlReadyCapture(
                     "turn hook card choice replay completed");
             }
+        }
+        catch (Exception ex) when (
+            ex is not OperationCanceledException &&
+            !session.Selector.IsInterruptionRequested)
+        {
+            MainFile.Logger.Error($"Turn hook choice replay failed: {ex}");
+            UndoRedoManager.ScheduleFailedCardChoiceReplayRecovery(
+                replayPoint,
+                ex);
         }
         finally
         {
@@ -527,8 +580,13 @@ internal static class CardChoiceCheckpointService
     public static async Task InterruptActiveChoiceAsync()
     {
         HookReplaySession? interruptedHookReplaySession = _activeHookReplaySession;
+        _activeReplay?.RequestInterruption();
         GameAction activeAction = await WaitForActiveChoiceActionAsync();
         Task? actionExecutionTask = ReflectionUtil.GetField<Task>(activeAction, "_executionTask");
+        bool hookActionWasWaitingToStart =
+            interruptedHookReplaySession != null &&
+            activeAction is GenericHookGameAction &&
+            activeAction.State == GameActionState.WaitingForExecution;
 
         interruptedHookReplaySession?.RequestInterruption();
         CancelActiveSelectionUi();
@@ -537,6 +595,12 @@ internal static class CardChoiceCheckpointService
             not GameActionState.Canceled)
         {
             activeAction.Cancel();
+        }
+
+        if (hookActionWasWaitingToStart &&
+            activeAction is GenericHookGameAction pendingHookAction)
+        {
+            CancelPendingHookActionStart(pendingHookAction);
         }
 
         RemoveChoiceActionFromQueue(activeAction);
@@ -548,6 +612,25 @@ internal static class CardChoiceCheckpointService
         await WaitForInterruptedChoiceToSettle(activeAction, actionExecutionTask);
         await WaitForHookReplayToSettle(interruptedHookReplaySession);
         MainFile.Logger.Info("Interrupted active card choice for timeline navigation.");
+    }
+
+    private static void CancelPendingHookActionStart(
+        GenericHookGameAction action)
+    {
+        // A rapid navigation input can acquire the restore lock after the hook
+        // action is enqueued but before ActionExecutor starts it. The replay task
+        // is then waiting on ExecutionStartedTask while the restore lock keeps the
+        // queue paused, so merely canceling/removing the action cannot wake it.
+        // Cancel that pre-execution signal as part of abandoning this timeline.
+        TaskCompletionSource executionStartedSource =
+            ReflectionUtil.GetRequiredField<TaskCompletionSource>(
+                action,
+                "_executionStartedSource");
+        if (executionStartedSource.TrySetCanceled())
+        {
+            MainFile.Logger.Info(
+                "Canceled a turn-hook action before execution so its replay could settle.");
+        }
     }
 
     private static async Task WaitForChoiceTaskToObserveInterruption(Task? actionExecutionTask)
@@ -639,6 +722,42 @@ internal static class CardChoiceCheckpointService
 
         await NGame.Instance.ToSignal(tree, SceneTree.SignalName.ProcessFrame);
         CompleteNewReplayUiAnimations(existingTweens);
+    }
+
+    public static void StabilizeHandRootTransitionForReplay()
+    {
+        NPlayerHand? hand = NPlayerHand.Instance;
+        if (hand == null || !GodotObject.IsInstanceValid(hand))
+        {
+            return;
+        }
+
+        foreach (string fieldName in new[]
+                 {
+                     "_animEnableTween",
+                     "_animInTween",
+                     "_animOutTween",
+                 })
+        {
+            ReflectionUtil.GetField<Tween>(hand, fieldName)?.Kill();
+            ReflectionUtil.SetField(hand, fieldName, null);
+        }
+
+        bool isDisabled = ReflectionUtil.GetRequiredField<bool>(hand, "_isDisabled");
+        if (isDisabled)
+        {
+            hand.Position = ReflectionUtil.GetStaticField<Vector2>(
+                                typeof(NPlayerHand),
+                                "_disablePosition");
+            hand.Modulate = ReflectionUtil.GetStaticField<Color>(
+                                typeof(NPlayerHand),
+                                "_disableModulate");
+        }
+        else
+        {
+            hand.Position = Vector2.Zero;
+            hand.Modulate = Colors.White;
+        }
     }
 
     public static void OnTargetChoiceReached()
@@ -846,7 +965,14 @@ internal static class CardChoiceCheckpointService
             }
         }
 
-        RunManager.Instance.ActionQueueSet.UnpauseAllPlayerQueues();
+        if (UndoRedoManager.IsNavigationInProgress)
+        {
+            RunManager.Instance.ActionQueueSet.PauseAllPlayerQueues();
+        }
+        else
+        {
+            RunManager.Instance.ActionQueueSet.UnpauseAllPlayerQueues();
+        }
         ReflectionUtil.Method(actionQueueSet.GetType(), "CheckIfQueuesEmpty")?.Invoke(actionQueueSet, null);
     }
 
@@ -908,14 +1034,16 @@ internal static class CardChoiceCheckpointService
 internal sealed class ReplayCardSelector : MegaCrit.Sts2.Core.TestSupport.ICardSelector
 {
     private readonly CardChoiceReplayPoint _target;
+    private readonly int _timelineGeneration;
     private readonly TaskCompletionSource _interruptionCompletionSource =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _choiceOrdinal;
     private bool _branched;
 
-    public ReplayCardSelector(CardChoiceReplayPoint target)
+    public ReplayCardSelector(CardChoiceReplayPoint target, int timelineGeneration)
     {
         _target = target;
+        _timelineGeneration = timelineGeneration;
     }
 
     public bool IsInterruptionRequested => _interruptionCompletionSource.Task.IsCompleted;
@@ -974,12 +1102,14 @@ internal sealed class ReplayCardSelector : MegaCrit.Sts2.Core.TestSupport.ICardS
         Task completedTask = await Task.WhenAny(
             selectionTask,
             _interruptionCompletionSource.Task);
+        ThrowIfInterruptionRequested();
         if (!ReferenceEquals(completedTask, selectionTask))
         {
             ThrowIfInterruptionRequested();
         }
 
         IReadOnlyList<CardModel> selectedCards = await selectionTask;
+        ThrowIfInterruptionRequested();
         if (!_branched)
         {
             UndoRedoManager.BeginBranchFromCurrentCheckpoint();
@@ -1001,7 +1131,9 @@ internal sealed class ReplayCardSelector : MegaCrit.Sts2.Core.TestSupport.ICardS
 
     private void ThrowIfInterruptionRequested()
     {
-        if (IsInterruptionRequested)
+        if (IsInterruptionRequested ||
+            !CardChoiceCheckpointService.IsCurrentTimelineGeneration(
+                _timelineGeneration))
         {
             throw new OperationCanceledException(
                 "Card choice replay was interrupted for timeline navigation.");
@@ -1346,7 +1478,8 @@ internal enum HookChoiceReplayKind
 
 internal sealed record HookChoiceRecording(
     CardChoiceReplaySequence Sequence,
-    CombatSnapshot ReplayBaseSnapshot);
+    CombatSnapshot ReplayBaseSnapshot,
+    int TimelineGeneration);
 
 internal sealed class CardChoiceRecord
 {
@@ -1633,6 +1766,7 @@ internal sealed class CardChoiceRequest
         {
             case CardChoicePresentation.Hand:
                 {
+                    CardChoiceCheckpointService.StabilizeHandRootTransitionForReplay();
                     HashSet<Tween> existingTweens =
                         CardChoiceCheckpointService.CaptureProcessedTweens();
                     Task<IEnumerable<CardModel>> selectionTask = combatRoom.Ui.Hand.SelectCards(
@@ -1645,6 +1779,7 @@ internal sealed class CardChoiceRequest
                 }
             case CardChoicePresentation.HandUpgrade:
                 {
+                    CardChoiceCheckpointService.StabilizeHandRootTransitionForReplay();
                     HashSet<Tween> existingTweens =
                         CardChoiceCheckpointService.CaptureProcessedTweens();
                     Task<IEnumerable<CardModel>> selectionTask = combatRoom.Ui.Hand.SelectCards(

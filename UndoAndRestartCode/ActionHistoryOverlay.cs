@@ -1,5 +1,6 @@
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization.Fonts;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
@@ -170,7 +171,7 @@ internal static class ActionHistoryOverlay
         foreach (Node child in _content.GetChildren().ToList())
         {
             _content.RemoveChild(child);
-            child.QueueFree();
+            child.QueueFreeSafely();
         }
 
         IReadOnlyList<ActionHistoryEntry> entries = UndoRedoManager.GetActionEntries();
