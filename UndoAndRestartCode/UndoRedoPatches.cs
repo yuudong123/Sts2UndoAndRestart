@@ -134,6 +134,25 @@ internal static class UndoRedoPatches
         UndoRedoManager.Reset();
     }
 
+    [HarmonyPatch(typeof(NPlayerHand), "OnSelectModeConfirmButtonPressed")]
+    [HarmonyPrefix]
+    private static bool BeforeHandSelectionConfirmed(NPlayerHand __instance)
+    {
+        TaskCompletionSource<IEnumerable<CardModel>>? completionSource =
+            ReflectionUtil.GetField<TaskCompletionSource<IEnumerable<CardModel>>>(
+                __instance,
+                "_selectionCompletionSource");
+        bool isCurrentSelection = __instance.IsInCardSelection &&
+                                  completionSource?.Task.IsCompleted == false;
+        if (!isCurrentSelection)
+        {
+            MainFile.Logger.Warn(
+                "Ignored a stale hand-selection confirmation after timeline restoration.");
+        }
+
+        return isCurrentSelection;
+    }
+
     [HarmonyPatch(typeof(NInputManager), nameof(NInputManager._Ready))]
     [HarmonyPostfix]
     private static void AfterInputManagerReady(NInputManager __instance)

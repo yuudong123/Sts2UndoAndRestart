@@ -9,13 +9,21 @@ restore path rebuilt from tag `v0.110.0.2`.
 - Game commit: `41cef1ea`
 - `sts2.dll` SHA-256:
   `0861BFA1DF347538D932F22D580E75420F08082792EB914E53B4882764ACDBE9`
-- Mod development version: `0.111.0.2`
-- Audit date: `2026-08-21`
+- Mod development version: `0.111.0.3`
+- Audit date: `2026-08-22`
 
 The previous `0.111.0.1` quick-exhaust cleanup removed live nodes directly.
 That approach is intentionally not reused. The current implementation treats
 restore as a serialized transaction and treats asynchronous visual tasks as
 temporary owners of their nodes.
+
+Version `0.111.0.3` additionally treats the hand UI as a projection with an
+explicit lifetime invariant. Godot nodes queued for deletion are rejected even
+while `GodotObject.IsInstanceValid` still returns true, disposed card visuals
+are detached without calling back through their dead `CardNode`, and missing
+holders are recreated from the restored hand pile before card-choice replay.
+The vanilla selection completion source is no longer nulled during restore;
+stale confirm-button releases are ignored instead.
 
 ## Verified Engine Sequence
 

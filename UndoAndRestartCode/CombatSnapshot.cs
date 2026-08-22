@@ -410,6 +410,7 @@ internal sealed class CombatSnapshot
         ClearTransientCardPlayUi();
         NormalizeHandInteractionState();
         RefreshHandUi();
+        ValidateHandUiProjection();
         if (NPlayerHand.Instance is { } hand && GodotObject.IsInstanceValid(hand))
         {
             ReflectionUtil.Method(typeof(NPlayerHand), "AnimDisable")
@@ -856,6 +857,15 @@ internal sealed class CombatSnapshot
             // 이미 정리된 드래그/플레이 노드 때문에 복원이 막히면 안 됨.
         }
 
+        PruneUnusableHandHolders(hand);
+        foreach (NHandCardHolder holder in GetAllHandContainerHolders(hand).ToList())
+        {
+            if (!TryUpdateHandHolder(holder))
+            {
+                DetachUnusableHolder(hand, holder);
+            }
+        }
+
         HashSet<CardModel> restoredCards = new(
             handPile.Cards,
             System.Collections.Generic.ReferenceEqualityComparer.Instance);
@@ -886,11 +896,21 @@ internal sealed class CombatSnapshot
             else if (holder.GetIndex() != i)
             {
                 hand.CardHolderContainer.MoveChild(holder, i);
-                holder.UpdateCard();
+                if (!TryUpdateHandHolder(holder))
+                {
+                    throw new ObjectDisposedException(
+                        nameof(NHandCardHolder),
+                        $"The restored hand holder for {card.Id} became invalid while it was being reordered.");
+                }
             }
             else
             {
-                holder.UpdateCard();
+                if (!TryUpdateHandHolder(holder))
+                {
+                    throw new ObjectDisposedException(
+                        nameof(NHandCardHolder),
+                        $"The restored hand holder for {card.Id} became invalid while it was being refreshed.");
+                }
             }
         }
 
@@ -903,7 +923,12 @@ internal sealed class CombatSnapshot
     {
         foreach (NHandCardHolder holder in GetAllHandContainerHolders(hand))
         {
-            holder.UpdateCard();
+            if (!TryUpdateHandHolder(holder))
+            {
+                throw new ObjectDisposedException(
+                    nameof(NHandCardHolder),
+                    "A restored hand holder became invalid during the final visual refresh.");
+            }
         }
     }
 
@@ -998,6 +1023,11 @@ internal sealed class CombatSnapshot
             return;
         }
 
+        // QueueFree keeps Godot objects "valid" until the end of the frame.  A
+        // holder that still references such a card must leave the live hand before
+        // vanilla selection cancellation or its deferred state refresh touches it.
+        PruneUnusableHandHolders(hand);
+
         if (hand.IsInCardSelection)
         {
             try
@@ -1015,7 +1045,8 @@ internal sealed class CombatSnapshot
         hand.PeekButton.Disable();
         ReflectionUtil.SetField(hand, "_currentMode", NPlayerHand.Mode.Play);
         ReflectionUtil.SetField(hand, "_currentSelectionFilter", null);
-        ReflectionUtil.SetField(hand, "_selectionCompletionSource", null);
+        // Vanilla intentionally leaves the completed selection source in place.
+        // Clearing it lets a queued confirm-button release dereference null.
         ReflectionUtil.GetField<List<CardModel>>(hand, "_selectedCards")?.Clear();
 
         Control? selectModeBackstop = ReflectionUtil.GetField<Control>(hand, "_selectModeBackstop");
@@ -1029,12 +1060,16 @@ internal sealed class CombatSnapshot
         ReflectionUtil.GetField<Control>(hand, "_selectionHeader")?.Hide();
 
         RestoreSelectedHandCardHolders(hand);
+        PruneUnusableHandHolders(hand);
 
-        foreach (NHandCardHolder holder in GetAllHandContainerHolders(hand))
+        foreach (NHandCardHolder holder in GetAllHandContainerHolders(hand).ToList())
         {
             holder.InSelectMode = false;
             holder.Visible = true;
-            holder.UpdateCard();
+            if (!TryUpdateHandHolder(holder))
+            {
+                DetachUnusableHolder(hand, holder);
+            }
         }
 
         ReflectionUtil.GetField<Tween>(hand, "_animEnableTween")?.Kill();
@@ -1063,11 +1098,24 @@ internal sealed class CombatSnapshot
 
         foreach (NCardHolder holder in selectedContainer.GetChildren().OfType<NCardHolder>().ToList())
         {
-            CardModel? card = holder.CardNode?.Model;
-            int restoredIndex = card == null ? -1 : FindCardIndexByReference(handPile.Cards, card);
+            if (!TryGetUsableCardNode(holder, out NCard? usableCardNode))
+            {
+                DetachUnusableHolder(hand, holder);
+                continue;
+            }
+
+            NCard cardNode = usableCardNode!;
+            CardModel? card = cardNode.Model;
+            if (card == null)
+            {
+                DetachUnusableHolder(hand, holder);
+                continue;
+            }
+
+            int restoredIndex = FindCardIndexByReference(handPile.Cards, card);
             if (restoredIndex >= 0)
             {
-                NCard cardNode = holder.CardNode!;
+                holder.GetParent()?.RemoveChild(holder);
                 holder.QueueFreeSafely();
                 hand.Add(cardNode, restoredIndex);
                 continue;
@@ -1092,7 +1140,186 @@ internal sealed class CombatSnapshot
 
     private static IEnumerable<NHandCardHolder> GetAllHandContainerHolders(NPlayerHand hand)
     {
+        return hand.CardHolderContainer.GetChildren()
+            .OfType<NHandCardHolder>()
+            .Where(IsUsableHandHolder);
+    }
+
+    private static IEnumerable<NHandCardHolder> GetRawHandContainerHolders(NPlayerHand hand)
+    {
         return hand.CardHolderContainer.GetChildren().OfType<NHandCardHolder>();
+    }
+
+    private static bool IsUsableHandHolder(NHandCardHolder holder)
+    {
+        return TryGetUsableCardNode(holder, out _);
+    }
+
+    private static bool TryGetUsableCardNode(
+        NCardHolder holder,
+        out NCard? cardNode)
+    {
+        cardNode = null;
+        if (!GodotObject.IsInstanceValid(holder) || holder.IsQueuedForDeletion())
+        {
+            return false;
+        }
+
+        try
+        {
+            cardNode = holder.CardNode;
+            return cardNode != null &&
+                   GodotObject.IsInstanceValid(cardNode) &&
+                   !cardNode.IsQueuedForDeletion() &&
+                   ReferenceEquals(cardNode.GetParent(), holder);
+        }
+        catch (ObjectDisposedException)
+        {
+            cardNode = null;
+            return false;
+        }
+    }
+
+    private static bool TryUpdateHandHolder(NHandCardHolder holder)
+    {
+        if (!IsUsableHandHolder(holder))
+        {
+            return false;
+        }
+
+        try
+        {
+            holder.UpdateCard();
+            return true;
+        }
+        catch (ObjectDisposedException exception)
+        {
+            MainFile.Logger.Warn(
+                $"Discarding a hand holder with disposed card visuals: {exception.ObjectName}");
+            return false;
+        }
+    }
+
+    private static void PruneUnusableHandHolders(NPlayerHand hand)
+    {
+        foreach (NHandCardHolder holder in GetRawHandContainerHolders(hand).ToList())
+        {
+            if (!IsUsableHandHolder(holder))
+            {
+                DetachUnusableHolder(hand, holder);
+            }
+        }
+
+        Node? selectedContainer =
+            ReflectionUtil.GetField<Node>(hand, "_selectedHandCardContainer");
+        if (selectedContainer != null && GodotObject.IsInstanceValid(selectedContainer))
+        {
+            foreach (NCardHolder holder in selectedContainer.GetChildren()
+                         .OfType<NCardHolder>()
+                         .ToList())
+            {
+                if (!TryGetUsableCardNode(holder, out _))
+                {
+                    DetachUnusableHolder(hand, holder);
+                }
+            }
+        }
+
+        HashSet<NHandCardHolder>? awaitingHolders =
+            ReflectionUtil.GetField<HashSet<NHandCardHolder>>(hand, "_holdersAwaitingQueue");
+        if (awaitingHolders == null)
+        {
+            return;
+        }
+
+        foreach (NHandCardHolder holder in awaitingHolders.ToList())
+        {
+            if (!IsUsableHandHolder(holder))
+            {
+                DetachUnusableHolder(hand, holder);
+            }
+        }
+    }
+
+    private static void DetachUnusableHolder(NPlayerHand hand, NCardHolder holder)
+    {
+        if (holder is NHandCardHolder handHolder)
+        {
+            ReflectionUtil.GetField<HashSet<NHandCardHolder>>(
+                    hand,
+                    "_holdersAwaitingQueue")
+                ?.Remove(handHolder);
+        }
+
+        if (!GodotObject.IsInstanceValid(holder))
+        {
+            return;
+        }
+
+        // NHandCardHolder._ExitTree unsubscribes through CardNode.Model.  Clear
+        // the managed reference first when that card is already disposed so the
+        // act of detaching the broken holder cannot throw the same exception.
+        ReflectionUtil.SetField(holder, "<CardNode>k__BackingField", null);
+        try
+        {
+            Node? parent = holder.GetParent();
+            if (parent != null && GodotObject.IsInstanceValid(parent))
+            {
+                parent.RemoveChild(holder);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // QueueFree below is still the best-effort final cleanup.
+        }
+
+        if (GodotObject.IsInstanceValid(holder) && !holder.IsQueuedForDeletion())
+        {
+            holder.QueueFreeSafely();
+        }
+    }
+
+    private void ValidateHandUiProjection()
+    {
+        NPlayerHand? hand = NPlayerHand.Instance;
+        CardPile? handPile = LocalPlayer()?.PlayerCombatState?.Hand;
+        if (hand == null || handPile == null || !GodotObject.IsInstanceValid(hand))
+        {
+            return;
+        }
+
+        List<NHandCardHolder> holders = GetRawHandContainerHolders(hand).ToList();
+        if (holders.Count != handPile.Cards.Count ||
+            holders.Any(holder => !IsUsableHandHolder(holder)))
+        {
+            throw new InvalidOperationException(
+                $"Hand UI projection is invalid after restore: models={handPile.Cards.Count}, holders={holders.Count}.");
+        }
+
+        for (int index = 0; index < handPile.Cards.Count; index++)
+        {
+            if (!ReferenceEquals(holders[index].CardNode?.Model, handPile.Cards[index]))
+            {
+                throw new InvalidOperationException(
+                    $"Hand UI projection order differs from the restored hand at index {index}.");
+            }
+        }
+
+        Node? selectedContainer =
+            ReflectionUtil.GetField<Node>(hand, "_selectedHandCardContainer");
+        if (selectedContainer?.GetChildren().OfType<NCardHolder>().Any() == true)
+        {
+            throw new InvalidOperationException(
+                "The selected-card container was not empty after snapshot restoration.");
+        }
+
+        HashSet<NHandCardHolder>? awaitingHolders =
+            ReflectionUtil.GetField<HashSet<NHandCardHolder>>(hand, "_holdersAwaitingQueue");
+        if (awaitingHolders?.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "The hand still contained queued card holders after snapshot restoration.");
+        }
     }
 
     private static void RestoreInterruptedCardPlayHolders(NPlayerHand hand)
