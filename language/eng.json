@@ -7,6 +7,7 @@
   "snapshot_limit_warning": "Warning: very high values can increase memory usage and UI refresh cost in long combats.",
   "show_history_tab": "Show top-right action history tab",
   "include_card_choice_snapshots": "Include card selection screens in snapshots",
+  "enable_mouse_side_buttons": "Add mouse side button controls (M4: Undo / M5: Redo)",
   "save": "Save",
   "save_failed": "Failed to save settings.",
   "number_only": "Enter numbers only.",

@@ -21,6 +21,7 @@ internal static class UndoText
     public static string SnapshotLimitWarning => Get("snapshot_limit_warning");
     public static string ShowHistoryTab => Get("show_history_tab");
     public static string IncludeCardChoiceSnapshots => Get("include_card_choice_snapshots");
+    public static string EnableMouseSideButtons => Get("enable_mouse_side_buttons");
     public static string Save => Get("save");
     public static string SaveFailed => Get("save_failed");
     public static string NumberOnly => Get("number_only");

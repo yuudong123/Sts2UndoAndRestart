@@ -89,7 +89,7 @@ Assigning `null` to `NCreature.DeathAnimationTask` does not cancel a running `An
 ## Settings and Input
 
 - Config path: `OS.GetUserDataDir()/mod_configs/UndoAndRestart.json`
-- The settings screen also controls action-history visibility and optional card-selection checkpoints.
+- The settings screen also controls action-history visibility, optional card-selection checkpoints, and M4/M5 controls used alongside the keyboard bindings.
 - Input actions:
   - `undo_and_restart_undo`
   - `undo_and_restart_redo`
@@ -100,6 +100,7 @@ Assigning `null` to `NCreature.DeathAnimationTask` does not cancel a running `An
   - Restart floor: `F5`
 
 If the player binds a key through the game's input settings, that binding takes priority over the fallback key. Undo/redo hotkeys are ignored while the player is typing into console-like controls, `LineEdit`, or `TextEdit`.
+The M4/M5 option adds Godot raw side-button events to the existing undo/redo path without replacing or disabling the keyboard bindings in the game's input settings.
 
 ## Multiplayer Policy
 

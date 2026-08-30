@@ -89,7 +89,7 @@ FloorRestartService
 ## 설정과 입력
 
 - 설정 파일: `OS.GetUserDataDir()/mod_configs/UndoAndRestart.json`
-- 설정 화면에서 사용 기록 표시와 카드 선택창 체크포인트 사용 여부도 조절합니다.
+- 설정 화면에서 사용 기록 표시, 카드 선택창 체크포인트, 키보드와 병행할 M4/M5 조작 사용 여부도 조절합니다.
 - 입력 액션:
   - `undo_and_restart_undo`
   - `undo_and_restart_redo`
@@ -100,6 +100,7 @@ FloorRestartService
   - 층 다시 시작: `F5`
 
 입력 설정에 사용자가 직접 단축키를 지정하면 기본 fallback 키보다 사용자 설정을 우선합니다. 콘솔, `LineEdit`, `TextEdit` 입력 중에는 undo/redo 단축키를 무시합니다.
+M4/M5 옵션은 Godot의 원시 마우스 옆 버튼 입력을 기존 undo/redo 경로에 추가하며, 게임 입력 설정의 키보드 바인딩을 대체하거나 비활성화하지 않습니다.
 
 ## 멀티플레이어 차단
 

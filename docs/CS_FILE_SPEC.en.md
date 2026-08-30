@@ -5,8 +5,8 @@
 | File | Responsibility |
 | --- | --- |
 | `MainFile.cs` | Mod initialization entry point. Registers Harmony patches, loads config, and subscribes to combat events. |
-| `UndoRedoPatches.cs` | Central Harmony patch collection. Handles input, action boundaries, input settings, history entries, and registration of asynchronous card VFX ownership. |
-| `ModSettingsPanelPatch.cs` | Adds snapshot count, action-history visibility, and card-selection checkpoint settings to the mod info screen. |
+| `UndoRedoPatches.cs` | Central Harmony patch collection. Handles keyboard and optional M4/M5 input, action boundaries, input settings, history entries, and registration of asynchronous card VFX ownership. |
+| `ModSettingsPanelPatch.cs` | Adds snapshot count, action-history visibility, card-selection checkpoint, and M4/M5 control settings to the mod info screen. |
 | `FeatureAnnouncement.cs` | Shows the one-time feature announcement after the main menu becomes ready and persists its acknowledgement. |
 | `NecrobinderVfxSafetyPatches.cs` | Patches `NNecrobinderVfx` head visibility and scythe flame callbacks so disposed Godot nodes do not throw during restore cleanup. |
 
@@ -30,7 +30,7 @@
 | `ActionHistoryOverlay.cs` | Builds and renders the top-right action history tab. Handles card/potion images, turn separators, current snapshot display, hover effects, and click-to-restore behavior. |
 | `UndoInputBindings.cs` | Registers undo/redo/restart actions in the game's input settings and connects user-defined bindings with fallback default keys. |
 | `UndoText.cs` | Loads localized UI strings and selects the matching language with English fallback. |
-| `UndoAndRestartConfig.cs` | Loads and saves snapshot count, overlay visibility, card-selection checkpoint, and announcement acknowledgement settings. |
+| `UndoAndRestartConfig.cs` | Loads and saves snapshot count, overlay visibility, card-selection checkpoint, M4/M5 control, and announcement acknowledgement settings. |
 | `language/*.json` | Contains English, Korean, Japanese, Simplified Chinese, and Traditional Chinese user-facing strings. |
 
 ## Restore Safety Helpers

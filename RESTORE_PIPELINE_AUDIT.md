@@ -9,8 +9,8 @@ restore path rebuilt from tag `v0.110.0.2`.
 - Game commit: `41cef1ea`
 - `sts2.dll` SHA-256:
   `0861BFA1DF347538D932F22D580E75420F08082792EB914E53B4882764ACDBE9`
-- Mod development version: `0.111.0.3`
-- Audit date: `2026-08-22`
+- Mod development version: `0.111.0.4`
+- Audit date: `2026-08-31`
 
 The previous `0.111.0.1` quick-exhaust cleanup removed live nodes directly.
 That approach is intentionally not reused. The current implementation treats
@@ -24,6 +24,12 @@ are detached without calling back through their dead `CardNode`, and missing
 holders are recreated from the restored hand pile before card-choice replay.
 The vanilla selection completion source is no longer nulled during restore;
 stale confirm-button releases are ignored instead.
+
+Version `0.111.0.4` tightens that projection invariant by pruning healthy but
+stale holders whose card models do not belong to the restored hand, while still
+letting valid holders run their vanilla tree-exit cleanup. It also adds optional
+raw M4/M5 undo and redo inputs through the mod settings without disabling or
+replacing the existing keyboard bindings.
 
 ## Verified Engine Sequence
 

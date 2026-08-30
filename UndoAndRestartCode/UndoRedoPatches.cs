@@ -43,6 +43,13 @@ internal static class UndoRedoPatches
             return;
         }
 
+        if (inputEvent is InputEventMouseButton mouseButton &&
+            mouseButton.Pressed &&
+            TryHandleMouseSideButton(mouseButton))
+        {
+            return;
+        }
+
         if (inputEvent is not InputEventKey key || !key.Pressed || key.Echo)
         {
             return;
@@ -74,6 +81,34 @@ internal static class UndoRedoPatches
                 NGame.Instance?.GetViewport()?.SetInputAsHandled();
             }
         }
+    }
+
+    private static bool TryHandleMouseSideButton(InputEventMouseButton inputEvent)
+    {
+        if (!UndoAndRestartConfig.EnableMouseSideButtons)
+        {
+            return false;
+        }
+
+        bool accepted;
+        switch (inputEvent.ButtonIndex)
+        {
+            case MouseButton.Xbutton1:
+                accepted = UndoRedoManager.HandleUndoKey();
+                break;
+            case MouseButton.Xbutton2:
+                accepted = UndoRedoManager.HandleRedoKey();
+                break;
+            default:
+                return false;
+        }
+
+        if (accepted)
+        {
+            NGame.Instance?.GetViewport()?.SetInputAsHandled();
+        }
+
+        return true;
     }
 
     private static void HandleInputAction(InputEventAction action)

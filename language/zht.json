@@ -7,6 +7,7 @@
   "snapshot_limit_warning": "警告：數值過高時，長時間戰鬥可能占用更多記憶體並增加介面更新負擔。",
   "show_history_tab": "顯示右上角的使用記錄標籤",
   "include_card_choice_snapshots": "將卡牌選擇畫面納入快照",
+  "enable_mouse_side_buttons": "新增滑鼠側鍵操作（M4：撤銷 / M5：重做）",
   "save": "儲存",
   "save_failed": "無法儲存設定。",
   "number_only": "請只輸入數字。",

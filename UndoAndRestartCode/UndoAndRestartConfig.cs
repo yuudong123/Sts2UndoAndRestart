@@ -11,6 +11,7 @@ internal static class UndoAndRestartConfig
     public static int SnapshotLimit { get; private set; } = DefaultSnapshotLimit;
     public static bool ShowActionHistoryOverlay { get; private set; } = true;
     public static bool IncludeCardChoiceSnapshots { get; private set; } = true;
+    public static bool EnableMouseSideButtons { get; private set; }
     public static bool HasAcknowledgedFeatureAnnouncement { get; private set; }
 
     public static void Load()
@@ -28,6 +29,7 @@ internal static class UndoAndRestartConfig
             SnapshotLimit = Math.Max(0, settings?.SnapshotLimit ?? DefaultSnapshotLimit);
             ShowActionHistoryOverlay = settings?.ShowActionHistoryOverlay ?? true;
             IncludeCardChoiceSnapshots = settings?.IncludeCardChoiceSnapshots ?? true;
+            EnableMouseSideButtons = settings?.EnableMouseSideButtons ?? false;
             HasAcknowledgedFeatureAnnouncement =
                 settings?.HasAcknowledgedFeatureAnnouncement ?? false;
         }
@@ -37,6 +39,7 @@ internal static class UndoAndRestartConfig
             SnapshotLimit = DefaultSnapshotLimit;
             ShowActionHistoryOverlay = true;
             IncludeCardChoiceSnapshots = true;
+            EnableMouseSideButtons = false;
             HasAcknowledgedFeatureAnnouncement = false;
         }
     }
@@ -44,14 +47,17 @@ internal static class UndoAndRestartConfig
     public static bool SaveSettings(
         int snapshotLimit,
         bool showActionHistoryOverlay,
-        bool includeCardChoiceSnapshots)
+        bool includeCardChoiceSnapshots,
+        bool enableMouseSideButtons)
     {
         int oldSnapshotLimit = SnapshotLimit;
         bool oldShowActionHistoryOverlay = ShowActionHistoryOverlay;
         bool oldIncludeCardChoiceSnapshots = IncludeCardChoiceSnapshots;
+        bool oldEnableMouseSideButtons = EnableMouseSideButtons;
         SnapshotLimit = Math.Max(0, snapshotLimit);
         ShowActionHistoryOverlay = showActionHistoryOverlay;
         IncludeCardChoiceSnapshots = includeCardChoiceSnapshots;
+        EnableMouseSideButtons = enableMouseSideButtons;
         if (Save())
         {
             return true;
@@ -60,6 +66,7 @@ internal static class UndoAndRestartConfig
         SnapshotLimit = oldSnapshotLimit;
         ShowActionHistoryOverlay = oldShowActionHistoryOverlay;
         IncludeCardChoiceSnapshots = oldIncludeCardChoiceSnapshots;
+        EnableMouseSideButtons = oldEnableMouseSideButtons;
         return false;
     }
 
@@ -87,6 +94,7 @@ internal static class UndoAndRestartConfig
                 SnapshotLimit = SnapshotLimit,
                 ShowActionHistoryOverlay = ShowActionHistoryOverlay,
                 IncludeCardChoiceSnapshots = IncludeCardChoiceSnapshots,
+                EnableMouseSideButtons = EnableMouseSideButtons,
                 HasAcknowledgedFeatureAnnouncement = HasAcknowledgedFeatureAnnouncement,
             }, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(ConfigPath, json);
@@ -104,6 +112,7 @@ internal static class UndoAndRestartConfig
         public int SnapshotLimit { get; set; } = DefaultSnapshotLimit;
         public bool ShowActionHistoryOverlay { get; set; } = true;
         public bool IncludeCardChoiceSnapshots { get; set; } = true;
+        public bool EnableMouseSideButtons { get; set; }
         public bool HasAcknowledgedFeatureAnnouncement { get; set; }
     }
 }

@@ -1192,19 +1192,40 @@ internal sealed class CombatSnapshot
             holder.UpdateCard();
             return true;
         }
-        catch (ObjectDisposedException exception)
+        catch (Exception exception)
         {
             MainFile.Logger.Warn(
-                $"Discarding a hand holder with disposed card visuals: {exception.ObjectName}");
+                $"Discarding a hand holder whose card refresh failed: " +
+                $"{exception.GetType().Name}: {exception.Message}");
             return false;
         }
     }
 
-    private static void PruneUnusableHandHolders(NPlayerHand hand)
+    private void PruneUnusableHandHolders(NPlayerHand hand)
     {
+        CardPile? restoredHand = LocalPlayer()?.PlayerCombatState?.Hand;
+        HashSet<CardModel>? restoredCards = restoredHand == null
+            ? null
+            : new HashSet<CardModel>(
+                restoredHand.Cards,
+                System.Collections.Generic.ReferenceEqualityComparer.Instance);
+
+        bool ShouldDetach(NCardHolder holder)
+        {
+            if (!TryGetUsableCardNode(holder, out NCard? cardNode))
+            {
+                return true;
+            }
+
+            CardModel? model = cardNode!.Model;
+            return model == null ||
+                   restoredCards != null &&
+                   (model.HasBeenRemovedFromState || !restoredCards.Contains(model));
+        }
+
         foreach (NHandCardHolder holder in GetRawHandContainerHolders(hand).ToList())
         {
-            if (!IsUsableHandHolder(holder))
+            if (ShouldDetach(holder))
             {
                 DetachUnusableHolder(hand, holder);
             }
@@ -1218,7 +1239,7 @@ internal sealed class CombatSnapshot
                          .OfType<NCardHolder>()
                          .ToList())
             {
-                if (!TryGetUsableCardNode(holder, out _))
+                if (ShouldDetach(holder))
                 {
                     DetachUnusableHolder(hand, holder);
                 }
@@ -1234,7 +1255,7 @@ internal sealed class CombatSnapshot
 
         foreach (NHandCardHolder holder in awaitingHolders.ToList())
         {
-            if (!IsUsableHandHolder(holder))
+            if (ShouldDetach(holder))
             {
                 DetachUnusableHolder(hand, holder);
             }
@@ -1256,10 +1277,13 @@ internal sealed class CombatSnapshot
             return;
         }
 
-        // NHandCardHolder._ExitTree unsubscribes through CardNode.Model.  Clear
-        // the managed reference first when that card is already disposed so the
-        // act of detaching the broken holder cannot throw the same exception.
-        ReflectionUtil.SetField(holder, "<CardNode>k__BackingField", null);
+        // Keep a healthy CardNode attached while leaving the tree so vanilla can
+        // unsubscribe from its model. Only sever a disposed node that cannot run
+        // the normal exit path safely.
+        if (!TryGetUsableCardNode(holder, out _))
+        {
+            ReflectionUtil.SetField(holder, "<CardNode>k__BackingField", null);
+        }
         try
         {
             Node? parent = holder.GetParent();

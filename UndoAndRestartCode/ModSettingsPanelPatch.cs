@@ -38,12 +38,13 @@ internal static class ModSettingsPanelPatch
         int savedSnapshotLimit = UndoAndRestartConfig.SnapshotLimit;
         bool savedShowHistory = UndoAndRestartConfig.ShowActionHistoryOverlay;
         bool savedIncludeCardChoices = UndoAndRestartConfig.IncludeCardChoiceSnapshots;
+        bool savedEnableMouseSideButtons = UndoAndRestartConfig.EnableMouseSideButtons;
 
         PanelContainer panel = new()
         {
             Name = PanelName,
             Position = new Vector2(0f, 318f),
-            CustomMinimumSize = new Vector2(560f, 252f),
+            CustomMinimumSize = new Vector2(560f, 288f),
         };
         StyleBoxFlat style = new()
         {
@@ -73,6 +74,9 @@ internal static class ModSettingsPanelPatch
         Button cardChoiceToggle = CreateToggleButton(
             UndoText.IncludeCardChoiceSnapshots,
             savedIncludeCardChoices);
+        Button mouseSideButtonsToggle = CreateToggleButton(
+            UndoText.EnableMouseSideButtons,
+            savedEnableMouseSideButtons);
 
         HBoxContainer snapshotRow = new();
         snapshotRow.AddThemeConstantOverride("separation", 10);
@@ -118,6 +122,7 @@ internal static class ModSettingsPanelPatch
         input.TextChanged += _ => RefreshSaveButton();
         historyToggle.Toggled += _ => RefreshSaveButton();
         cardChoiceToggle.Toggled += _ => RefreshSaveButton();
+        mouseSideButtonsToggle.Toggled += _ => RefreshSaveButton();
         input.TextSubmitted += _ =>
         {
             if (!saveButton.Disabled)
@@ -134,6 +139,7 @@ internal static class ModSettingsPanelPatch
         footer.AddChild(saveButton);
         box.AddChild(historyToggle);
         box.AddChild(cardChoiceToggle);
+        box.AddChild(mouseSideButtonsToggle);
         box.AddChild(snapshotRow);
         box.AddChild(hint);
         box.AddChild(warning);
@@ -150,7 +156,8 @@ internal static class ModSettingsPanelPatch
                     savedSnapshotLimit.ToString(),
                     StringComparison.Ordinal) ||
                 historyToggle.ButtonPressed != savedShowHistory ||
-                cardChoiceToggle.ButtonPressed != savedIncludeCardChoices;
+                cardChoiceToggle.ButtonPressed != savedIncludeCardChoices ||
+                mouseSideButtonsToggle.ButtonPressed != savedEnableMouseSideButtons;
             saveButton.Disabled = !changed;
             if (changed)
             {
@@ -172,7 +179,8 @@ internal static class ModSettingsPanelPatch
             if (!UndoAndRestartConfig.SaveSettings(
                     normalizedSnapshotLimit,
                     historyToggle.ButtonPressed,
-                    cardChoiceToggle.ButtonPressed))
+                    cardChoiceToggle.ButtonPressed,
+                    mouseSideButtonsToggle.ButtonPressed))
             {
                 status.Text = UndoText.SaveFailed;
                 status.AddThemeColorOverride("font_color", new Color(1f, 0.58f, 0.42f));
@@ -182,6 +190,7 @@ internal static class ModSettingsPanelPatch
             savedSnapshotLimit = normalizedSnapshotLimit;
             savedShowHistory = historyToggle.ButtonPressed;
             savedIncludeCardChoices = cardChoiceToggle.ButtonPressed;
+            savedEnableMouseSideButtons = mouseSideButtonsToggle.ButtonPressed;
             input.Text = normalizedSnapshotLimit.ToString();
             status.Text = "";
             savedIndicator.Text = "V";

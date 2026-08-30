@@ -7,6 +7,7 @@
   "snapshot_limit_warning": "警告: 非常に大きな値を設定すると、長時間の戦闘でメモリ使用量やUIの更新負荷が増加する場合があります。",
   "show_history_tab": "右上に行動履歴タブを表示",
   "include_card_choice_snapshots": "カード選択画面をスナップショットに含める",
+  "enable_mouse_side_buttons": "マウスサイドボタン操作を追加（M4：元に戻す / M5：やり直す）",
   "save": "保存",
   "save_failed": "設定を保存できませんでした。",
   "number_only": "数字のみを入力してください。",

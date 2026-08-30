@@ -7,6 +7,7 @@
   "snapshot_limit_warning": "경고: 수치를 너무 크게 설정하면 긴 전투에서 메모리 사용량과 UI 갱신 비용이 커질 수 있습니다.",
   "show_history_tab": "우상단 사용 기록 탭 표시",
   "include_card_choice_snapshots": "카드 선택창을 스냅샷에 포함",
+  "enable_mouse_side_buttons": "마우스 옆 버튼 조작 추가 (M4: 되돌리기 / M5: 다시 실행)",
   "save": "저장",
   "save_failed": "설정을 저장하지 못했습니다.",
   "number_only": "숫자만 입력해 주세요.",

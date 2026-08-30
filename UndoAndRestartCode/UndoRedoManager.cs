@@ -66,13 +66,13 @@ internal static class UndoRedoManager
 
     public static bool HandleUndoKey()
     {
-        MainFile.Logger.Info("Left arrow pressed.");
+        MainFile.Logger.Info("Undo input pressed.");
         return RequestMove(-1);
     }
 
     public static bool HandleRedoKey()
     {
-        MainFile.Logger.Info("Right arrow pressed.");
+        MainFile.Logger.Info("Redo input pressed.");
         return RequestMove(1);
     }
 

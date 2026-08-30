@@ -5,8 +5,8 @@
 | 파일 | 책임 |
 | --- | --- |
 | `MainFile.cs` | 모드 초기화 진입점입니다. Harmony 패치를 등록하고 설정을 로드하며 전투 이벤트를 구독합니다. |
-| `UndoRedoPatches.cs` | Harmony 패치 모음입니다. 입력, 액션 경계, 입력 설정, 사용 기록, 비동기 카드 VFX 소유권 등록을 담당합니다. |
-| `ModSettingsPanelPatch.cs` | 모드 정보 화면에 스냅샷 개수, 사용 기록 탭 표시, 카드 선택창 체크포인트 설정 UI를 추가합니다. |
+| `UndoRedoPatches.cs` | Harmony 패치 모음입니다. 키보드 및 선택형 M4/M5 입력, 액션 경계, 입력 설정, 사용 기록, 비동기 카드 VFX 소유권 등록을 담당합니다. |
+| `ModSettingsPanelPatch.cs` | 모드 정보 화면에 스냅샷 개수, 사용 기록 탭 표시, 카드 선택창 체크포인트, M4/M5 조작 설정 UI를 추가합니다. |
 | `FeatureAnnouncement.cs` | 메인 메뉴 준비 후 최초 1회 기능 안내창을 표시하고 확인 여부를 저장합니다. |
 | `NecrobinderVfxSafetyPatches.cs` | `NNecrobinderVfx`의 머리 표시와 낫불꽃 콜백을 안전하게 처리합니다. 복원 중 이미 정리된 Godot 노드 때문에 VFX 콜백이 예외를 내지 않게 막습니다. |
 
@@ -30,7 +30,7 @@
 | `ActionHistoryOverlay.cs` | 우상단 사용 기록 탭을 만들고 렌더링합니다. 카드/포션 이미지, 턴 구분선, 현재 스냅샷 표시, 클릭 이동을 처리합니다. |
 | `UndoInputBindings.cs` | 게임 입력 설정에 undo/redo/restart 액션을 등록하고 사용자 지정 단축키와 기본 fallback 키를 연결합니다. |
 | `UndoText.cs` | 언어 파일에서 UI 문구를 읽고 현재 게임 언어에 맞는 번역을 선택하며 누락 시 영어로 대체합니다. |
-| `UndoAndRestartConfig.cs` | 스냅샷 개수, 사용 기록 탭 표시, 카드 선택창 체크포인트, 기능 안내 확인 여부를 설정 파일로 저장하고 로드합니다. |
+| `UndoAndRestartConfig.cs` | 스냅샷 개수, 사용 기록 탭 표시, 카드 선택창 체크포인트, M4/M5 조작, 기능 안내 확인 여부를 설정 파일로 저장하고 로드합니다. |
 | `language/*.json` | 영어, 한국어, 일본어, 중국어 간체, 중국어 번체 사용자 문구를 저장합니다. |
 
 ## 복원 안정화 보조

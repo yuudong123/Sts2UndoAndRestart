@@ -33,10 +33,11 @@ For <latest beta version> -> <matching GitHub release download URL>
 - Redo: default key is right arrow.
 - Restart floor: default key is `F5`.
 - The three hotkeys can be changed from the game's input settings screen.
+- An optional mod setting adds mouse side button controls alongside the keyboard hotkeys (`M4`: undo, `M5`: redo).
 - Used cards and potions can be viewed in a grid-based action history tab during combat.
 - Clicking an item in the action history tab restores the corresponding snapshot.
 - Card-selection screens can optionally be stored as undo/redo checkpoints. The option is enabled by default.
-- The mod settings screen lets players change the maximum snapshot count, show or hide the action history tab, and enable or disable card-selection checkpoints.
+- The mod settings screen lets players change the maximum snapshot count, show or hide the action history tab, enable or disable card-selection checkpoints, and add M4/M5 controls.
 - User-facing mod text is loaded from separate English, Korean, Japanese, Simplified Chinese, and Traditional Chinese language files.
 
 ### Multiplayer Policy
@@ -141,10 +142,11 @@ For <최신 beta 버전> -> <해당 GitHub 릴리스 다운로드 URL>
 - 다시 실행: 기본값은 오른쪽 방향키입니다.
 - 층 다시 시작: 기본값은 `F5`입니다.
 - 게임의 입력 설정 화면에서 세 기능의 단축키를 직접 변경할 수 있습니다.
+- 모드 설정에서 키보드 단축키와 함께 사용할 마우스 옆 버튼 조작을 선택적으로 추가할 수 있습니다(`M4`: 되돌리기, `M5`: 다시 실행).
 - 전투 중 사용한 카드와 포션을 격자형 사용 기록 탭으로 볼 수 있습니다.
 - 사용 기록 탭에서 특정 항목을 클릭하면 해당 스냅샷으로 이동합니다.
 - 카드 선택창을 선택적으로 undo/redo 체크포인트에 포함할 수 있으며 기본값은 켜짐입니다.
-- 모드 설정에서 최대 스냅샷 수, 사용 기록 탭 표시 여부, 카드 선택창 체크포인트 사용 여부를 조절할 수 있습니다.
+- 모드 설정에서 최대 스냅샷 수, 사용 기록 탭 표시 여부, 카드 선택창 체크포인트 사용 여부, M4/M5 조작 추가 여부를 조절할 수 있습니다.
 - 사용자에게 표시되는 모드 문구는 영어, 한국어, 일본어, 중국어 간체, 중국어 번체 언어 파일로 분리되어 있습니다.
 
 ### 멀티플레이어 정책
