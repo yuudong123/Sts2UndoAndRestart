@@ -51,38 +51,6 @@ This mod is distributed with `affects_gameplay=false`. Players should still be a
 - Architecture notes: [docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md)
 - C# file specification: [docs/CS_FILE_SPEC.en.md](docs/CS_FILE_SPEC.en.md)
 
-### Build Requirements
-
-- Windows
-- .NET SDK 9.0
-- Slay the Spire 2 installation
-- Game runtime DLLs: `0Harmony.dll`, `GodotSharp.dll`, `sts2.dll`
-
-The default build path assumes this Steam install location:
-
-```powershell
-D:\Games\Steam\steamapps\common\Slay the Spire 2
-```
-
-If the game is installed somewhere else, pass `Sts2InstallDir` or set the `STS2_INSTALL_DIR` environment variable.
-
-```powershell
-dotnet build .\Undo.csproj -c Release /p:Sts2InstallDir="C:\Path\To\Slay the Spire 2"
-```
-
-Or:
-
-```powershell
-$env:STS2_INSTALL_DIR = "C:\Path\To\Slay the Spire 2"
-dotnet build .\Undo.csproj -c Release
-```
-
-The built DLL is generated here:
-
-```text
-bin\Release\net9.0\UndoAndRestart.dll
-```
-
 ### Project Structure
 
 ```text
@@ -97,12 +65,6 @@ docs/
 - `UndoAndRestartCode/`: mod source code.
 - `docs/ARCHITECTURE.en.md`: snapshot engine and flow documentation.
 - `docs/CS_FILE_SPEC.en.md`: responsibility list for each `.cs` file.
-
-### Repository Notes
-
-- `bin/` and `obj/` are build outputs and should not be committed.
-- STS2 runtime DLLs are part of the game installation and are not included in this repository.
-- Steam Workshop upload packages are managed separately.
 
 ### Development Note
 
@@ -160,38 +122,6 @@ For <최신 beta 버전> -> <해당 GitHub 릴리스 다운로드 URL>
 - 한국어 구조 명세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 한국어 C# 파일 명세: [docs/CS_FILE_SPEC.md](docs/CS_FILE_SPEC.md)
 
-### 빌드 요구 사항
-
-- Windows
-- .NET SDK 9.0
-- Slay the Spire 2 설치본
-- 게임 런타임 DLL: `0Harmony.dll`, `GodotSharp.dll`, `sts2.dll`
-
-기본 빌드 경로는 다음 Steam 설치 경로를 사용합니다.
-
-```powershell
-D:\Games\Steam\steamapps\common\Slay the Spire 2
-```
-
-다른 경로에 설치되어 있다면 `Sts2InstallDir` 속성이나 `STS2_INSTALL_DIR` 환경 변수를 사용합니다.
-
-```powershell
-dotnet build .\Undo.csproj -c Release /p:Sts2InstallDir="C:\Path\To\Slay the Spire 2"
-```
-
-또는:
-
-```powershell
-$env:STS2_INSTALL_DIR = "C:\Path\To\Slay the Spire 2"
-dotnet build .\Undo.csproj -c Release
-```
-
-빌드 결과물은 다음 위치에 생성됩니다.
-
-```text
-bin\Release\net9.0\UndoAndRestart.dll
-```
-
 ### 프로젝트 구조
 
 ```text
@@ -206,12 +136,6 @@ docs/
 - `UndoAndRestartCode/`: 실제 모드 소스입니다.
 - `docs/ARCHITECTURE.md`: 스냅샷 엔진과 주요 흐름 설명입니다.
 - `docs/CS_FILE_SPEC.md`: `.cs` 파일별 책임 명세입니다.
-
-### 공개 저장소 주의 사항
-
-- `bin/`, `obj/`는 빌드 산출물이므로 커밋하지 않습니다.
-- STS2 런타임 DLL은 게임 설치본의 파일이므로 저장소에 포함하지 않습니다.
-- Steam Workshop 업로드 패키지는 별도 폴더에서 관리합니다.
 
 ### 개발 노트
 
