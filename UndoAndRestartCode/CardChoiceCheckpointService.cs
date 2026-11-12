@@ -99,8 +99,6 @@ internal static class CardChoiceCheckpointService
         OriginalSequences.Clear();
     }
 
-    public static int CurrentTimelineGeneration => _timelineGeneration;
-
     public static bool IsCurrentTimelineGeneration(int generation)
     {
         return generation == _timelineGeneration;
@@ -347,7 +345,11 @@ internal static class CardChoiceCheckpointService
             throw new InvalidOperationException("A card choice replay is already active.");
         }
 
-        if (CardSelectCmd.Selector != null || CardSelectCmd.LocalSelector != null)
+        // 0.113 moved the selector stacks from static CardSelectCmd state into the
+        // run (one stack per player plus a single local selector).
+        CardSelectorStack selectors = RunManager.Instance.CardSelectorStack;
+        Player replayPlayer = replayPoint.Sequence.Player;
+        if (selectors.GetSelector(replayPlayer) != null || selectors.LocalSelector != null)
         {
             throw new InvalidOperationException("Another card selector is active.");
         }
@@ -362,9 +364,9 @@ internal static class CardChoiceCheckpointService
         StabilizeHandRootTransitionForReplay();
 
         ReplayCardSelector selector = new(replayPoint, _timelineGeneration);
-        IDisposable selectorScope = CardSelectCmd.UseSelector(
-            selector,
-            localOnly: replayPoint.Sequence.IsHookReplay);
+        IDisposable selectorScope = replayPoint.Sequence.IsHookReplay
+            ? selectors.UseLocalSelector(selector)
+            : selectors.UseSelector(replayPlayer, selector);
 
         _activeReplay = selector;
         _selectorScope = selectorScope;
@@ -647,7 +649,7 @@ internal static class CardChoiceCheckpointService
                 return;
             }
 
-            await AwaitProcessFrame();
+            await GodotFrames.NextProcessFrameAsync();
         }
 
         MainFile.Logger.Warn(
@@ -670,7 +672,7 @@ internal static class CardChoiceCheckpointService
                 return;
             }
 
-            await AwaitProcessFrame();
+            await GodotFrames.NextProcessFrameAsync();
         }
 
         throw new TimeoutException(
@@ -692,12 +694,13 @@ internal static class CardChoiceCheckpointService
                 throw new InvalidOperationException("The card choice ended before it could be interrupted.");
             }
 
-            NGame game = NGame.Instance ??
-                         throw new InvalidOperationException(
-                             "The game scene ended while waiting for the card choice action.");
-            await game.ToSignal(
-                game.GetTree(),
-                SceneTree.SignalName.ProcessFrame);
+            if (NGame.Instance == null)
+            {
+                throw new InvalidOperationException(
+                    "The game scene ended while waiting for the card choice action.");
+            }
+
+            await GodotFrames.NextProcessFrameAsync();
         }
 
         throw new TimeoutException("Timed out waiting for the active card choice action.");
@@ -792,7 +795,7 @@ internal static class CardChoiceCheckpointService
         {
             CompleteNewReplayUiAnimations(existingTweens);
             RemoveReplayItemThrowVfx();
-            await AwaitProcessFrame();
+            await GodotFrames.NextProcessFrameAsync();
         }
     }
 
@@ -839,21 +842,16 @@ internal static class CardChoiceCheckpointService
             bool actionExecutionFinished = actionExecutionTask?.IsCompleted != false;
             if (actionExecutionFinished && !actionExecutor.IsRunning)
             {
-                await AwaitProcessFrame();
+                await GodotFrames.NextProcessFrameAsync();
                 FinalizeInterruptedChoiceCleanup(actionExecutor, activeAction);
                 return;
             }
 
-            await AwaitProcessFrame();
+            await GodotFrames.NextProcessFrameAsync();
         }
 
         actionExecutor.Cancel();
-        if (Engine.GetMainLoop() is SceneTree fallbackSceneTree)
-        {
-            await fallbackSceneTree.ToSignal(
-                fallbackSceneTree,
-                SceneTree.SignalName.ProcessFrame);
-        }
+        await GodotFrames.NextProcessFrameAsync();
 
         FinalizeInterruptedChoiceCleanup(actionExecutor, activeAction);
         MainFile.Logger.Warn(
@@ -873,18 +871,6 @@ internal static class CardChoiceCheckpointService
         {
             throw new InvalidOperationException(
                 "The action queue did not become empty after interrupting the card choice.");
-        }
-    }
-
-    private static async Task AwaitProcessFrame()
-    {
-        if (Engine.GetMainLoop() is SceneTree sceneTree)
-        {
-            await sceneTree.ToSignal(sceneTree, SceneTree.SignalName.ProcessFrame);
-        }
-        else
-        {
-            await Task.Delay(16);
         }
     }
 
@@ -1195,6 +1181,8 @@ internal sealed class CardChoiceReplaySequence
     }
 
     public bool IsHookReplay => _hookReplayKind != HookChoiceReplayKind.None;
+
+    public Player Player => _player;
     public bool IsTurnStartHookReplay => _hookReplayKind == HookChoiceReplayKind.TurnStart;
     public bool HasChoices => _choices.Count > 0;
     public AbstractModel? FallbackSourceModel => _fallbackSourceModel;

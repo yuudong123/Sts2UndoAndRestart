@@ -4,10 +4,10 @@
 
 `Undo And Restart` is a Slay the Spire 2 C# mod that adds undo, redo, floor restart, and an action history tab for combat.
 
-The current source targets STS2 `0.111.0` only. Older game versions must use a matching historical mod release.
+The current source targets STS2 `0.113.0` only. Older game versions must use a matching historical mod release.
 
 Mod versions follow `<game version>.<mod patch number>`. The first release for
-STS2 `0.111.0` is `0.111.0.1`; additional mod-only fixes increment the final
+STS2 `0.113.0` is `0.113.0.1`; additional mod-only fixes increment the final
 number. Every Workshop update note must state the supported game version. Before
 publishing an update note, verify the latest public and beta game versions and
 attach direct download links to their matching GitHub releases.
@@ -44,7 +44,8 @@ This mod is distributed with `affects_gameplay=false`. Players should still be a
 
 ### Documentation
 
-- STS2 0.111 snapshot audit: [SNAPSHOT_AUDIT_0.111.md](SNAPSHOT_AUDIT_0.111.md)
+- STS2 0.113 snapshot audit: [SNAPSHOT_AUDIT_0.113.md](SNAPSHOT_AUDIT_0.113.md)
+- Previous STS2 0.111 snapshot audit: [SNAPSHOT_AUDIT_0.111.md](SNAPSHOT_AUDIT_0.111.md)
 - STS2 0.111 restore pipeline audit: [RESTORE_PIPELINE_AUDIT.md](RESTORE_PIPELINE_AUDIT.md)
 - Previous STS2 0.110 snapshot audit: [SNAPSHOT_AUDIT_0.110.md](SNAPSHOT_AUDIT_0.110.md)
 - Previous STS2 0.109 snapshot audit: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
@@ -68,16 +69,16 @@ docs/
 
 ### Development Note
 
-The broad refactoring pass, code specifications, and README were drafted with Codex and uploaded after developer review.
+The broad refactoring pass, code specifications, and README were drafted with Codex, Claude and uploaded after developer review.
 
 ## 한국어
 
 `Undo And Restart`는 Slay the Spire 2 전투 중 되돌리기, 다시 실행, 층 다시 시작, 사용 기록 탭을 추가하는 C# 모드입니다.
 
-현재 소스는 STS2 `0.111.0`만 지원합니다. 이전 게임 버전에서는 해당 버전에 맞는 과거 모드 릴리스를 사용해야 합니다.
+현재 소스는 STS2 `0.113.0`만 지원합니다. 이전 게임 버전에서는 해당 버전에 맞는 과거 모드 릴리스를 사용해야 합니다.
 
 모드 버전은 `<게임 버전>.<모드 패치 번호>` 형식을 사용합니다. STS2
-`0.111.0`의 첫 배포 버전은 `0.111.0.1`이며, 게임 버전이 그대로인 상태에서
+`0.113.0`의 첫 배포 버전은 `0.113.0.1`이며, 게임 버전이 그대로인 상태에서
 모드만 추가 수정하면 마지막 번호를 1씩 올립니다. 모든 창작마당 업데이트
 노트에는 지원하는 게임 버전을 명시합니다. 업데이트 노트를 게시하기 전에
 최신 public 및 beta 게임 버전을 확인하고, 각 버전에 맞는 GitHub 릴리스의
@@ -115,7 +116,8 @@ For <최신 beta 버전> -> <해당 GitHub 릴리스 다운로드 URL>
 
 ### 문서
 
-- STS2 0.111 스냅샷 감사: [SNAPSHOT_AUDIT_0.111.md](SNAPSHOT_AUDIT_0.111.md)
+- STS2 0.113 스냅샷 감사: [SNAPSHOT_AUDIT_0.113.md](SNAPSHOT_AUDIT_0.113.md)
+- 이전 STS2 0.111 스냅샷 감사: [SNAPSHOT_AUDIT_0.111.md](SNAPSHOT_AUDIT_0.111.md)
 - STS2 0.111 복원 파이프라인 감사: [RESTORE_PIPELINE_AUDIT.md](RESTORE_PIPELINE_AUDIT.md)
 - 이전 STS2 0.110 스냅샷 감사: [SNAPSHOT_AUDIT_0.110.md](SNAPSHOT_AUDIT_0.110.md)
 - 이전 STS2 0.109 스냅샷 감사: [SNAPSHOT_AUDIT_0.109.md](SNAPSHOT_AUDIT_0.109.md)
@@ -139,4 +141,4 @@ docs/
 
 ### 개발 노트
 
-전반적인 리팩토링, 코드 명세서, README는 Codex에서 초안을 작성했고 개발자가 검토를 마친 후 업로드되었습니다.
+전반적인 리팩토링, 코드 명세서, README는 Codex, Claude에서 초안을 작성했고 개발자가 검토를 마친 후 업로드되었습니다.

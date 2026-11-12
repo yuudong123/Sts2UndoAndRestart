@@ -1,4 +1,5 @@
 using Godot;
+using MegaCrit.Sts2.Core.ControllerInput;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
@@ -76,7 +77,20 @@ internal static class UndoInputBindings
         TaskHelper.RunSafely(WaitForKeyboardMap(inputManager));
     }
 
-    public static bool ShouldHandleDefaultKeyFallback(StringName action)
+    /// <summary>
+    /// The built-in ←/→/F5 keys are only a fallback for players who never bound
+    /// the action in Settings → Input.
+    /// <list type="bullet">
+    /// <item>A binding in either keyboard map (mouse+keyboard or keyboard-only)
+    /// means the player chose a key, so only that key works. Checking just the
+    /// current mode's map left the default alive in the other mode, and the game
+    /// switches to keyboard-only mode on its own when an arrow key is pressed.</item>
+    /// <item>Keyboard-only mode uses the arrow keys for vanilla left/right
+    /// navigation (DefaultKbOnlyInputMap), so arrow fallbacks never apply there.
+    /// Consuming them made hand and target selection impossible.</item>
+    /// </list>
+    /// </summary>
+    public static bool ShouldHandleDefaultKeyFallback(StringName action, Key key)
     {
         NInputManager? inputManager = NInputManager.Instance;
         if (inputManager == null)
@@ -84,7 +98,17 @@ internal static class UndoInputBindings
             return true;
         }
 
-        return inputManager.GetCurrentHotkey(action) == Key.None;
+        if (inputManager.GetMKbHotkey(action) != Key.None ||
+            inputManager.GetKbOnlyHotkey(action) != Key.None)
+        {
+            return false;
+        }
+
+        // 0.113 drives keyboard-only navigation from the player's keyboard-only
+        // direction bindings instead of the hard-coded arrow keys.
+        bool isNavigationKey = inputManager.IsKbOnlyDirectionalKey(key);
+        return !isNavigationKey ||
+               inputManager.ControllerManager.InputType != InputType.KeyboardOnlyMode;
     }
 
     public static bool IsUndoAction(InputEventAction action)
@@ -139,14 +163,7 @@ internal static class UndoInputBindings
                     return;
                 }
 
-                if (Engine.GetMainLoop() is SceneTree sceneTree)
-                {
-                    await sceneTree.ToSignal(sceneTree, SceneTree.SignalName.ProcessFrame);
-                }
-                else
-                {
-                    await Task.Delay(16);
-                }
+                await GodotFrames.NextProcessFrameAsync();
             }
         }
         finally

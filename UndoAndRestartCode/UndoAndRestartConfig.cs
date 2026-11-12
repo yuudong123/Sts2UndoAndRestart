@@ -82,8 +82,6 @@ internal static class UndoAndRestartConfig
         return false;
     }
 
-    public static string LimitRangeText => UndoText.LimitRangeText;
-
     private static bool Save()
     {
         try

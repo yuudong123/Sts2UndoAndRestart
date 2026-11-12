@@ -2,6 +2,7 @@ using Godot;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Cards;
@@ -53,8 +54,6 @@ internal static class TransientCardVfxCleanup
 
         return activeOwners.Length;
     }
-
-    public static int ActiveVisualCount => SnapshotActiveOwners().Length;
 
     private static GodotObject[] SnapshotActiveOwners()
     {
@@ -118,20 +117,9 @@ internal static class TransientCardVfxCleanup
     {
         foreach (GodotObject owner in owners)
         {
-            if (!GodotObject.IsInstanceValid(owner))
+            if (GodotObject.IsInstanceValid(owner))
             {
-                continue;
-            }
-
-            if (owner is CanvasItem canvasItem)
-            {
-                canvasItem.Visible = false;
-            }
-
-            if (TryGetOwnedCard(owner) is { } card &&
-                GodotObject.IsInstanceValid(card))
-            {
-                card.Visible = false;
+                QuarantineVisual(owner);
             }
         }
     }
@@ -192,7 +180,7 @@ internal static class TransientCardVfxCleanup
 
         foreach (NCard card in transientCards)
         {
-            RemoveCardImmediately(card);
+            RetireCardNode(card);
         }
     }
 
@@ -231,12 +219,6 @@ internal static class TransientCardVfxCleanup
 
         foreach (Node child in root.GetChildren())
         {
-            if (child is NCardExhaustQuickVfx quickExhaustVfx)
-            {
-                QueueQuickExhaustTreeForDeletion(quickExhaustVfx);
-                continue;
-            }
-
             if (IsTransientCardVfx(child))
             {
                 if (IsActiveVisual(child))
@@ -245,6 +227,22 @@ internal static class TransientCardVfxCleanup
                     continue;
                 }
 
+                if (child is NCardExhaustQuickVfx quickExhaustVfx &&
+                    !ReflectionUtil.GetField<bool>(quickExhaustVfx, "_isFinishing"))
+                {
+                    // Before _isFinishing the VFX is a child of its card, and its
+                    // _ExitTree returns that card to the pool. Removing either node
+                    // here would either re-enter RemoveChild on the card's ancestor
+                    // or hand the pool a node that is also being destroyed. Without
+                    // a running task nothing will finish it, so only hide it.
+                    MainFile.Logger.Warn(
+                        "Left an idle quick-exhaust VFX hidden because removing it would free its card twice.");
+                    QuarantineVisual(quickExhaustVfx);
+                    continue;
+                }
+
+                // Once finished, a quick-exhaust VFX owns only itself: vanilla has
+                // already returned its card to the pool.
                 RemoveImmediately(child);
                 continue;
             }
@@ -274,29 +272,6 @@ internal static class TransientCardVfxCleanup
         return false;
     }
 
-    private static void QueueQuickExhaustTreeForDeletion(
-        NCardExhaustQuickVfx quickExhaustVfx)
-    {
-        // The quick exhaust VFX is a child of the card it owns. Its _ExitTree
-        // callback queues that parent card for deletion. Removing the child
-        // immediately while traversing the card tree therefore re-enters
-        // RemoveChild on an ancestor and can crash Godot. Queue the parent
-        // first so the callback observes an already-deleting card.
-        NCard? card = ReflectionUtil.GetField<NCard>(quickExhaustVfx, "_cardNode");
-        if (card != null &&
-            GodotObject.IsInstanceValid(card) &&
-            !card.IsQueuedForDeletion())
-        {
-            card.QueueFree();
-        }
-
-        if (GodotObject.IsInstanceValid(quickExhaustVfx) &&
-            !quickExhaustVfx.IsQueuedForDeletion())
-        {
-            quickExhaustVfx.QueueFree();
-        }
-    }
-
     private static void RemoveImmediately(Node node)
     {
         if (!GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion())
@@ -304,9 +279,9 @@ internal static class TransientCardVfxCleanup
             return;
         }
 
-        if (node is NCard card && IsCardReferencedByActiveVisual(card))
+        if (node is NCard card)
         {
-            card.Visible = false;
+            RetireCardNode(card);
             return;
         }
 
@@ -327,7 +302,22 @@ internal static class TransientCardVfxCleanup
         node.QueueFreeSafely();
     }
 
-    private static void RemoveCardImmediately(NCard card)
+    /// <summary>
+    /// The single way restore retires a card node it no longer projects.
+    /// <para>
+    /// NCard is pooled. A node must reach <c>NodePool</c> exactly once and only
+    /// through <c>QueueFreeSafely</c>; a second return lets the pool hand one node
+    /// to two owners, and destroying a pooled node puts a disposed object back
+    /// into circulation (ObjectDisposedException in NCard.OnReturnedFromPool).
+    /// </para>
+    /// <para>
+    /// A node still used by an old-timeline visual task belongs to that task,
+    /// which returns it when it finishes. Restore only hides it and, when it sits
+    /// where <c>NCard.FindOnTable</c> looks (play container/queue) or has lost its
+    /// parent, parks it on the combat UI so vanilla cannot reuse it.
+    /// </para>
+    /// </summary>
+    public static void RetireCardNode(NCard card)
     {
         if (!GodotObject.IsInstanceValid(card) || card.IsQueuedForDeletion())
         {
@@ -337,11 +327,47 @@ internal static class TransientCardVfxCleanup
         if (IsCardReferencedByActiveVisual(card))
         {
             card.Visible = false;
+            ParkOutsideCardLookups(card);
             return;
         }
 
+        // The play-pile tween is bound to the combat room, not to the card, so
+        // leaving the tree does not stop it.
         card.PlayPileTween?.Kill();
         card.PlayPileTween = null;
         card.QueueFreeSafely();
+    }
+
+    private static void ParkOutsideCardLookups(NCard card)
+    {
+        NCombatUi? ui = NCombatRoom.Instance?.Ui;
+        if (ui == null || !GodotObject.IsInstanceValid(ui))
+        {
+            return;
+        }
+
+        Node? parent = card.GetParent();
+        if (parent == null)
+        {
+            ui.AddChild(card);
+        }
+        else if (ReferenceEquals(parent, ui.PlayContainer) ||
+                 ReferenceEquals(parent, ui.PlayQueue))
+        {
+            card.Reparent(ui);
+        }
+    }
+
+    private static void QuarantineVisual(GodotObject owner)
+    {
+        if (owner is CanvasItem canvasItem && GodotObject.IsInstanceValid(canvasItem))
+        {
+            canvasItem.Visible = false;
+        }
+
+        if (TryGetOwnedCard(owner) is { } card && GodotObject.IsInstanceValid(card))
+        {
+            card.Visible = false;
+        }
     }
 }

@@ -1,7 +1,6 @@
+using MegaCrit.Sts2.Core.Entities.FoolArrows;
 using System.Collections;
 using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -19,7 +18,11 @@ internal sealed class ObjectGraphSnapshot
     private const BindingFlags Fields = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly MethodInfo MemberwiseCloneMethod =
         typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    // Capture walks hundreds of models per snapshot. Cache the per-type field
+    // list (already filtered) and the collection classification so reflection
+    // metadata is resolved once per type instead of once per object.
     private static readonly Dictionary<Type, FieldInfo[]> FieldCache = new();
+    private static readonly Dictionary<Type, bool> CollectionTypeCache = new();
     private readonly object _root;
     private readonly Dictionary<FieldInfo, object?> _values = new();
 
@@ -27,13 +30,8 @@ internal sealed class ObjectGraphSnapshot
     {
         _root = root;
         Dictionary<object, object> visited = new(ReferenceEqualityComparer.Instance);
-        foreach (FieldInfo field in EnumerateFields(root.GetType()))
+        foreach (FieldInfo field in SnapshotFields(root.GetType()))
         {
-            if (ShouldSkipField(field))
-            {
-                continue;
-            }
-
             _values[field] = Clone(field.GetValue(root), root, visited);
         }
     }
@@ -88,8 +86,7 @@ internal sealed class ObjectGraphSnapshot
         HashSet<AbstractModel> models = new(ReferenceEqualityComparer.Instance);
         HashSet<object> visited = new(ReferenceEqualityComparer.Instance);
         Stack<object?> pending = new(
-            EnumerateFields(root.GetType())
-                .Where(field => !ShouldSkipField(field))
+            SnapshotFields(root.GetType())
                 .Select(field => field.GetValue(root)));
 
         while (pending.Count > 0)
@@ -137,12 +134,9 @@ internal sealed class ObjectGraphSnapshot
                 continue;
             }
 
-            foreach (FieldInfo field in EnumerateFields(type))
+            foreach (FieldInfo field in SnapshotFields(type))
             {
-                if (!ShouldSkipField(field))
-                {
-                    pending.Push(field.GetValue(value));
-                }
+                pending.Push(field.GetValue(value));
             }
         }
 
@@ -151,12 +145,19 @@ internal sealed class ObjectGraphSnapshot
 
     private static bool IsCollectionType(Type type)
     {
-        return type.IsArray ||
-               typeof(IList).IsAssignableFrom(type) ||
-               type.GetInterfaces().Any(interfaceType =>
-                   interfaceType.IsGenericType &&
-                   (interfaceType.GetGenericTypeDefinition() == typeof(ICollection<>) ||
-                    interfaceType.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>)));
+        if (CollectionTypeCache.TryGetValue(type, out bool cached))
+        {
+            return cached;
+        }
+
+        bool isCollection = type.IsArray ||
+                            typeof(IList).IsAssignableFrom(type) ||
+                            type.GetInterfaces().Any(interfaceType =>
+                                interfaceType.IsGenericType &&
+                                (interfaceType.GetGenericTypeDefinition() == typeof(ICollection<>) ||
+                                 interfaceType.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>)));
+        CollectionTypeCache[type] = isCollection;
+        return isCollection;
     }
 
     private static object? Clone(
@@ -250,13 +251,8 @@ internal sealed class ObjectGraphSnapshot
         Type type = value.GetType();
         object clone = MemberwiseCloneMethod.Invoke(value, null)!;
         visited[value] = clone;
-        foreach (FieldInfo field in EnumerateFields(type))
+        foreach (FieldInfo field in SnapshotFields(type))
         {
-            if (ShouldSkipField(field))
-            {
-                continue;
-            }
-
             object? child = field.GetValue(value);
             object? childClone = Clone(child, owner, visited);
             if (ReferenceEquals(child, childClone))
@@ -339,13 +335,8 @@ internal sealed class ObjectGraphSnapshot
             !ShouldPreserveReference(destination) &&
             destinationType == source.GetType())
         {
-            foreach (FieldInfo field in EnumerateFields(destinationType))
+            foreach (FieldInfo field in SnapshotFields(destinationType))
             {
-                if (ShouldSkipField(field))
-                {
-                    continue;
-                }
-
                 object? sourceValue = field.GetValue(source);
                 object? destinationValue = field.GetValue(destination);
                 if (ReferenceEquals(destinationValue, sourceValue))
@@ -407,7 +398,11 @@ internal sealed class ObjectGraphSnapshot
                value is Creature ||
                value is CombatState ||
                value is RunState ||
-               value is CardPile;
+               value is CardPile ||
+               // 0.113 Fool arrows: the same slot objects are shared by the player
+               // and ImpaledPower; cloning them split that identity on every restore.
+               // Their mutable fields are restored by CombatSnapshot.PlayerState.
+               value is ArrowSlot;
     }
 
     private static bool ShouldPreserveReference(object value)
@@ -430,7 +425,10 @@ internal sealed class ObjectGraphSnapshot
                typeof(CancellationTokenSource).IsAssignableFrom(field.FieldType);
     }
 
-    private static IEnumerable<FieldInfo> EnumerateFields(Type type)
+    /// <summary>
+    /// Instance fields of the type and its bases that participate in snapshots.
+    /// </summary>
+    private static FieldInfo[] SnapshotFields(Type type)
     {
         if (FieldCache.TryGetValue(type, out FieldInfo[]? cached))
         {
@@ -440,7 +438,9 @@ internal sealed class ObjectGraphSnapshot
         List<FieldInfo> fields = new();
         for (Type? current = type; current != null && current != typeof(object); current = current.BaseType)
         {
-            fields.AddRange(current.GetFields(Fields | BindingFlags.DeclaredOnly));
+            fields.AddRange(current
+                .GetFields(Fields | BindingFlags.DeclaredOnly)
+                .Where(field => !ShouldSkipField(field)));
         }
 
         FieldInfo[] result = fields.ToArray();
@@ -497,20 +497,5 @@ internal sealed class ObjectGraphSnapshot
         }
 
         return true;
-    }
-
-    private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
-    {
-        public static ReferenceEqualityComparer Instance { get; } = new();
-
-        public new bool Equals(object? x, object? y)
-        {
-            return ReferenceEquals(x, y);
-        }
-
-        public int GetHashCode(object obj)
-        {
-            return RuntimeHelpers.GetHashCode(obj);
-        }
     }
 }

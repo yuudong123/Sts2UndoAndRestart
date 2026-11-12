@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Forms;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Utilities;
 
 namespace UndoAndRestartCode;
 
@@ -27,6 +28,15 @@ internal sealed class CombatVisualSnapshot
 
         return snapshot;
     }
+
+    /// <summary>
+    /// The node's own "interaction allowed" flag at capture time. Since 0.113 the
+    /// game keeps it on the node (flee, reattach, scripted toggles), not on the model.
+    /// </summary>
+    public bool? InteractionAllowed(Creature creature) =>
+        creature.CombatId is uint id && _creatures.TryGetValue(id, out CreatureVisualState? state)
+            ? state.InteractionAllowed
+            : null;
 
     public void Restore(IEnumerable<Creature> creatures)
     {
@@ -58,6 +68,8 @@ internal sealed class CombatVisualSnapshot
         private readonly List<AnimationTrackState> _tracks = new();
         private readonly FormVfxState _formVfx = FormVfxState.Empty;
 
+        public bool? InteractionAllowed { get; }
+
         private CreatureVisualState(NCreature? node, Creature creature)
         {
             if (node == null || !GodotObject.IsInstanceValid(node))
@@ -66,6 +78,7 @@ internal sealed class CombatVisualSnapshot
             }
 
             _position = node.Position;
+            InteractionAllowed = ReflectionUtil.Field(node.GetType(), "_interactionAllowed")?.GetValue(node) as bool?;
             if (ReflectionUtil.Field(node.GetType(), "_tempScale")?.GetValue(node) is float tempScale)
             {
                 _tempScale = tempScale;
@@ -221,10 +234,10 @@ internal sealed class CombatVisualSnapshot
             }
 
             // Osty derives its presentation scale from its restored model size and
-            // does not update NCreature._tempScale in OstyScaleToSize.
+            // does not update NCreature._tempScale in ScaleAndPositionOsty.
             if (creature.Monster is Osty)
             {
-                node.OstyScaleToSize(creature.MaxHp, 0.0);
+                node.ScaleAndPositionOsty(creature.MaxHp, 0.0);
                 return;
             }
 
@@ -326,7 +339,7 @@ internal sealed class CombatVisualSnapshot
 
             bool showStateDisplay = creature.IsAlive &&
                                     (!creature.IsMonster ||
-                                     creature.Monster?.IsHealthBarVisible != false);
+                                     creature.Monster?.IsInteractable != false);
             Node? stateDisplay = ReflectionUtil.GetField<Node>(node, "_stateDisplay");
             if (stateDisplay is CanvasItem canvas)
             {
@@ -436,9 +449,10 @@ internal sealed class CombatVisualSnapshot
 
         public static FormVfxState Capture(NCreature node, Creature creature)
         {
-            Control? holder = ReflectionUtil.GetField<Control>(
-                node.Visuals,
-                "_formVfxHolder");
+            // 0.111 exposes the holder as a public property. The former private
+            // _formVfxHolder field no longer exists, so reflection returned null and
+            // every form VFX was silently skipped.
+            Control? holder = node.Visuals.FormVfxHolder;
             NFormVfx? vfx = holder?.GetChildren().OfType<NFormVfx>().FirstOrDefault();
             if (vfx == null || !GodotObject.IsInstanceValid(vfx))
             {
@@ -455,9 +469,7 @@ internal sealed class CombatVisualSnapshot
 
         public void Restore(NCreature node, Creature creature)
         {
-            Control? holder = ReflectionUtil.GetField<Control>(
-                node.Visuals,
-                "_formVfxHolder");
+            Control? holder = node.Visuals.FormVfxHolder;
             if (holder == null || !GodotObject.IsInstanceValid(holder))
             {
                 return;
@@ -498,9 +510,12 @@ internal sealed class CombatVisualSnapshot
 
         private static void ForceVisualState(NFormVfx vfx, bool isActive)
         {
-            object? valueRamp = ReflectionUtil.GetField<object>(vfx, "_valueRamp");
-            ReflectionUtil.Method(valueRamp?.GetType() ?? typeof(object), "ForceValue", typeof(float))
-                ?.Invoke(valueRamp, new object[] { isActive ? 1f : 0f });
+            // Only some form VFX (Echo/Serpent/Void) own a value ramp.
+            NValueRamp? valueRamp = ReflectionUtil.GetField<NValueRamp>(vfx, "_valueRamp");
+            if (valueRamp != null && GodotObject.IsInstanceValid(valueRamp))
+            {
+                valueRamp.ForceValue(isActive ? 1f : 0f);
+            }
 
             foreach (string methodName in new[]
                      {

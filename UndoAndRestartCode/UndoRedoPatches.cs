@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.Debug;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Cards;
@@ -24,115 +25,100 @@ namespace UndoAndRestartCode;
 [HarmonyPatch]
 internal static class UndoRedoPatches
 {
-    private static readonly Dictionary<UsePotionAction, ActionHistoryEntry?> PotionEntries = new();
-    private static readonly Dictionary<DiscardPotionGameAction, ActionHistoryEntry?> DiscardPotionEntries = new();
-
     [HarmonyPatch(typeof(NGame), nameof(NGame._Input))]
     [HarmonyPrefix]
     private static void OnGameInput(InputEvent inputEvent)
     {
-        if (ShouldIgnoreHotkeys())
+        // NGame._Input receives every event, including each mouse motion. Reject
+        // non-press events before walking the focus tree or touching input maps.
+        if (!inputEvent.IsPressed() ||
+            inputEvent.IsEcho() ||
+            inputEvent is not (InputEventAction or InputEventMouseButton or InputEventKey) ||
+            ShouldIgnoreHotkeys())
         {
             return;
         }
 
         UndoInputBindings.EnsureRegistered();
-        if (inputEvent is InputEventAction action && action.Pressed)
+        switch (inputEvent)
         {
-            HandleInputAction(action);
-            return;
-        }
-
-        if (inputEvent is InputEventMouseButton mouseButton &&
-            mouseButton.Pressed &&
-            TryHandleMouseSideButton(mouseButton))
-        {
-            return;
-        }
-
-        if (inputEvent is not InputEventKey key || !key.Pressed || key.Echo)
-        {
-            return;
-        }
-
-        long keyCode = (long)key.Keycode;
-        long physicalKeyCode = (long)key.PhysicalKeycode;
-        if ((keyCode == UndoRedoManager.LeftArrowKeyCode || physicalKeyCode == UndoRedoManager.LeftArrowKeyCode) &&
-            UndoInputBindings.ShouldHandleDefaultKeyFallback(UndoInputBindings.UndoAction))
-        {
-            if (UndoRedoManager.HandleUndoKey())
-            {
-                NGame.Instance?.GetViewport()?.SetInputAsHandled();
-            }
-        }
-        else if ((keyCode == UndoRedoManager.RightArrowKeyCode || physicalKeyCode == UndoRedoManager.RightArrowKeyCode) &&
-                 UndoInputBindings.ShouldHandleDefaultKeyFallback(UndoInputBindings.RedoAction))
-        {
-            if (UndoRedoManager.HandleRedoKey())
-            {
-                NGame.Instance?.GetViewport()?.SetInputAsHandled();
-            }
-        }
-        else if ((keyCode == UndoRedoManager.QuickRestartKeyCode || physicalKeyCode == UndoRedoManager.QuickRestartKeyCode) &&
-                 UndoInputBindings.ShouldHandleDefaultKeyFallback(UndoInputBindings.RestartAction))
-        {
-            if (FloorRestartService.HandleQuickRestartKey())
-            {
-                NGame.Instance?.GetViewport()?.SetInputAsHandled();
-            }
+            case InputEventAction action:
+                HandleInputAction(action);
+                break;
+            case InputEventMouseButton mouseButton:
+                HandleMouseSideButton(mouseButton);
+                break;
+            case InputEventKey key:
+                HandleDefaultKeyFallback(key);
+                break;
         }
     }
 
-    private static bool TryHandleMouseSideButton(InputEventMouseButton inputEvent)
+    private static void HandleDefaultKeyFallback(InputEventKey key)
+    {
+        // Default keys apply only while the player has not bound the action
+        // (see ShouldHandleDefaultKeyFallback for the keyboard-only rule).
+        if (IsKey(key, Key.Left) &&
+            UndoInputBindings.ShouldHandleDefaultKeyFallback(UndoInputBindings.UndoAction, Key.Left))
+        {
+            MarkInputHandledIf(UndoRedoManager.HandleUndoKey());
+        }
+        else if (IsKey(key, Key.Right) &&
+                 UndoInputBindings.ShouldHandleDefaultKeyFallback(UndoInputBindings.RedoAction, Key.Right))
+        {
+            MarkInputHandledIf(UndoRedoManager.HandleRedoKey());
+        }
+        else if (IsKey(key, Key.F5) &&
+                 UndoInputBindings.ShouldHandleDefaultKeyFallback(UndoInputBindings.RestartAction, Key.F5))
+        {
+            MarkInputHandledIf(FloorRestartService.HandleQuickRestartKey());
+        }
+    }
+
+    private static bool IsKey(InputEventKey inputEvent, Key key)
+    {
+        return inputEvent.Keycode == key || inputEvent.PhysicalKeycode == key;
+    }
+
+    private static void HandleMouseSideButton(InputEventMouseButton inputEvent)
     {
         if (!UndoAndRestartConfig.EnableMouseSideButtons)
         {
-            return false;
+            return;
         }
 
-        bool accepted;
         switch (inputEvent.ButtonIndex)
         {
             case MouseButton.Xbutton1:
-                accepted = UndoRedoManager.HandleUndoKey();
+                MarkInputHandledIf(UndoRedoManager.HandleUndoKey());
                 break;
             case MouseButton.Xbutton2:
-                accepted = UndoRedoManager.HandleRedoKey();
+                MarkInputHandledIf(UndoRedoManager.HandleRedoKey());
                 break;
-            default:
-                return false;
         }
-
-        if (accepted)
-        {
-            NGame.Instance?.GetViewport()?.SetInputAsHandled();
-        }
-
-        return true;
     }
 
     private static void HandleInputAction(InputEventAction action)
     {
         if (UndoInputBindings.IsUndoAction(action))
         {
-            if (UndoRedoManager.HandleUndoKey())
-            {
-                NGame.Instance?.GetViewport()?.SetInputAsHandled();
-            }
+            MarkInputHandledIf(UndoRedoManager.HandleUndoKey());
         }
         else if (UndoInputBindings.IsRedoAction(action))
         {
-            if (UndoRedoManager.HandleRedoKey())
-            {
-                NGame.Instance?.GetViewport()?.SetInputAsHandled();
-            }
+            MarkInputHandledIf(UndoRedoManager.HandleRedoKey());
         }
         else if (UndoInputBindings.IsRestartAction(action))
         {
-            if (FloorRestartService.HandleQuickRestartKey())
-            {
-                NGame.Instance?.GetViewport()?.SetInputAsHandled();
-            }
+            MarkInputHandledIf(FloorRestartService.HandleQuickRestartKey());
+        }
+    }
+
+    private static void MarkInputHandledIf(bool accepted)
+    {
+        if (accepted)
+        {
+            NGame.Instance?.GetViewport()?.SetInputAsHandled();
         }
     }
 
@@ -151,9 +137,7 @@ internal static class UndoRedoPatches
 
         for (Node? node = focused; node != null; node = node.GetParent())
         {
-            string name = node.Name.ToString();
-            if (name.Contains("Console", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("DevConsole", StringComparison.OrdinalIgnoreCase))
+            if (node is NDevConsole)
             {
                 return true;
             }
@@ -735,55 +719,66 @@ internal static class UndoRedoPatches
 
     [HarmonyPatch(typeof(UsePotionAction), "ExecuteAction")]
     [HarmonyPrefix]
-    private static void BeforeUsePotion(UsePotionAction __instance)
+    private static void BeforeUsePotion(
+        UsePotionAction __instance,
+        out ActionHistoryEntry? __state)
     {
+        // The slot is emptied while the action runs, so the history entry must be
+        // built before it. Harmony's __state carries it to the postfix of the
+        // same call without a shared dictionary that could leak on exceptions.
+        __state = null;
         if (__instance.WasEnqueuedInCombat)
         {
-            PotionEntries[__instance] = CreatePotionEntry(__instance);
+            __state = CreatePotionEntry(__instance);
             UndoRedoManager.CaptureBeforeAction(__instance, "UsePotionAction");
         }
     }
 
     [HarmonyPatch(typeof(UsePotionAction), "ExecuteAction")]
     [HarmonyPostfix]
-    private static void AfterUsePotion(UsePotionAction __instance, ref Task __result)
+    private static void AfterUsePotion(
+        UsePotionAction __instance,
+        ActionHistoryEntry? __state,
+        ref Task __result)
     {
         if (__instance.WasEnqueuedInCombat)
         {
-            PotionEntries.TryGetValue(__instance, out ActionHistoryEntry? entry);
-            PotionEntries.Remove(__instance);
             __result = UndoRedoManager.CaptureAfterActionAsync(
                 __result,
                 __instance,
                 "UsePotionAction",
-                entry);
+                __state);
         }
     }
 
     [HarmonyPatch(typeof(DiscardPotionGameAction), "ExecuteAction")]
     [HarmonyPrefix]
-    private static void BeforeDiscardPotion(DiscardPotionGameAction __instance)
+    private static void BeforeDiscardPotion(
+        DiscardPotionGameAction __instance,
+        out ActionHistoryEntry? __state)
     {
+        __state = null;
         if (__instance.WasEnqueuedInCombat)
         {
-            DiscardPotionEntries[__instance] = CreateDiscardPotionEntry(__instance);
+            __state = CreateDiscardPotionEntry(__instance);
             UndoRedoManager.CaptureBeforeAction(__instance, "DiscardPotionGameAction");
         }
     }
 
     [HarmonyPatch(typeof(DiscardPotionGameAction), "ExecuteAction")]
     [HarmonyPostfix]
-    private static void AfterDiscardPotion(DiscardPotionGameAction __instance, ref Task __result)
+    private static void AfterDiscardPotion(
+        DiscardPotionGameAction __instance,
+        ActionHistoryEntry? __state,
+        ref Task __result)
     {
         if (__instance.WasEnqueuedInCombat)
         {
-            DiscardPotionEntries.TryGetValue(__instance, out ActionHistoryEntry? entry);
-            DiscardPotionEntries.Remove(__instance);
             __result = UndoRedoManager.CaptureAfterActionAsync(
                 __result,
                 __instance,
                 "DiscardPotionGameAction",
-                entry);
+                __state);
         }
     }
 
@@ -792,15 +787,19 @@ internal static class UndoRedoPatches
     private static void BeforeEndTurn(EndPlayerTurnAction __instance)
     {
         UndoRedoManager.CaptureBeforeAction(__instance, "EndPlayerTurnAction");
-        UndoRedoManager.PrepareNextTurnStartEntry();
-    }
+        // Ending the turn is a new action. Without this, ending the turn after an
+        // undo kept the old redo branch: the next turn-start capture was discarded
+        // as "inside redo history" and redo jumped back to the abandoned timeline.
+        // Choice replay never runs EndPlayerTurnAction (it calls the phase directly).
+        if (!CardChoiceCheckpointService.HasActiveChoice)
+        {
+            UndoRedoManager.BeginBranchFromCurrentCheckpoint();
+        }
 
-    [HarmonyPatch(typeof(EndPlayerTurnAction), "ExecuteAction")]
-    [HarmonyPostfix]
-    private static void AfterEndTurn()
-    {
-        // 이 액션은 플레이어의 턴 종료 준비만 표시함.
-        // 여기서 캡처하면 다음 플레이어 조작 가능 스냅샷 전에 redo가 걸리는 비플레이 중간 지점이 생김.
+        // No postfix capture: EndPlayerTurnAction only marks the player ready. A
+        // snapshot here would create a non-playable redo point before the next
+        // player-control snapshot.
+        UndoRedoManager.PrepareNextTurnStartEntry();
     }
 
     private static ActionHistoryEntry? CreateCardEntry(PlayCardAction action)
@@ -814,7 +813,7 @@ internal static class UndoRedoPatches
             }
 
             string target = action.Target?.LogName ?? UndoText.NoTarget;
-            return new ActionHistoryEntry(ActionHistoryEntryKind.Card, card.Title, target, GetRoundNumber(), card: card);
+            return new ActionHistoryEntry(ActionHistoryEntryKind.Card, card.Title, target, UndoRedoManager.CurrentPlayerTurnNumber(), card: card);
         }
         catch (Exception ex)
         {
@@ -834,7 +833,7 @@ internal static class UndoRedoPatches
             }
 
             string target = GetTargetName(action.TargetId);
-            return new ActionHistoryEntry(ActionHistoryEntryKind.Potion, potion.Title.GetFormattedText() ?? potion.Id.Entry, target, GetRoundNumber(), potion: potion);
+            return new ActionHistoryEntry(ActionHistoryEntryKind.Potion, potion.Title.GetFormattedText() ?? potion.Id.Entry, target, UndoRedoManager.CurrentPlayerTurnNumber(), potion: potion);
         }
         catch (Exception ex)
         {
@@ -855,7 +854,7 @@ internal static class UndoRedoPatches
                 return null;
             }
 
-            return new ActionHistoryEntry(ActionHistoryEntryKind.DiscardPotion, potion.Title.GetFormattedText() ?? potion.Id.Entry, UndoText.DiscardSlot(slotIndex), GetRoundNumber(), potion: potion);
+            return new ActionHistoryEntry(ActionHistoryEntryKind.DiscardPotion, potion.Title.GetFormattedText() ?? potion.Id.Entry, UndoText.DiscardSlot(slotIndex), UndoRedoManager.CurrentPlayerTurnNumber(), potion: potion);
         }
         catch (Exception ex)
         {
@@ -864,29 +863,9 @@ internal static class UndoRedoPatches
         }
     }
 
-    private static int GetRoundNumber()
-    {
-        return CombatManager.Instance.DebugOnlyGetState()?.RoundNumber ?? 1;
-    }
-
     private static string GetTargetName(uint? targetId)
     {
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (state == null || targetId == null)
-        {
-            return UndoText.NoTarget;
-        }
-
-        foreach (string fieldName in new[] { "_allies", "_enemies", "_escapedCreatures" })
-        {
-            List<Creature>? creatures = ReflectionUtil.GetField<List<Creature>>(state, fieldName);
-            Creature? creature = creatures?.FirstOrDefault(creature => creature.CombatId == targetId.Value);
-            if (creature != null)
-            {
-                return creature.LogName;
-            }
-        }
-
-        return UndoText.NoTarget;
+        return CombatManager.Instance.DebugOnlyGetState()?.GetCreature(targetId)?.LogName ??
+               UndoText.NoTarget;
     }
 }

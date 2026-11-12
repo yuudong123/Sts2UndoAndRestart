@@ -34,6 +34,10 @@ internal static class CombatRuntimeStateCleanup
         ReflectionUtil.GetRequiredField<HashSet<Player>>(
             turnState,
             "<PlayersReadyToBeginEnemyTurn>k__BackingField").Clear();
+        // 0.113: players who ended the turn with canBackOut: false (Void Form, death).
+        ReflectionUtil.GetRequiredField<HashSet<Player>>(
+            turnState,
+            "<PlayersThatCannotUnEndTurn>k__BackingField").Clear();
     }
 
     public static bool TryClearStaleEndingTurnFlagsIfPlayerControlAvailable(

@@ -42,6 +42,7 @@
 | `SovereignBladeVfxSync.cs` | 군주의 칼날처럼 별도 VFX가 카드 개수와 동기화되어야 하는 카드를 복원 상태에 맞춰 정리합니다. |
 | `CreaturePresentationLifecycle.cs` | 되감을 수 없는 사망 애니메이션 노드를 엔진 취소 경계에서 폐기하고, 복원 후 새 프레젠테이션 노드로 재생성되게 합니다. |
 | `ReflectionUtil.cs` | private 필드와 메소드 접근을 단일 경로로 모읍니다. 게임 업데이트 시 reflection 실패 지점을 추적하기 쉽게 합니다. |
+| `GodotFrames.cs` | 모든 폴링 루프가 쓰는 "다음 SceneTree 프로세스 프레임 대기" 단일 경로입니다. |
 
 ## F5 재시작
 

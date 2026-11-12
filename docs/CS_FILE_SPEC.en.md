@@ -42,6 +42,7 @@
 | `SovereignBladeVfxSync.cs` | Keeps Sovereign Blade-style floating VFX synchronized with the restored card count. |
 | `CreaturePresentationLifecycle.cs` | Retires non-rewindable death-animation nodes at the engine cancellation boundary so clean presentation nodes can be created after restore. |
 | `ReflectionUtil.cs` | Centralizes private field and method access so reflection failures are easier to audit after game updates. |
+| `GodotFrames.cs` | Single "wait for the next SceneTree process frame" path shared by every polling loop. |
 
 ## F5 Restart
 

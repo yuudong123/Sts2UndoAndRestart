@@ -202,35 +202,29 @@ internal static class ActionHistoryOverlay
             currentGrid.AddChild(CreateEntryTile(entry, cursor));
         }
 
-        if (entries.Count == 0 || cursor >= entries[^1].SnapshotIndex)
+        if (cursor >= entries[^1].SnapshotIndex)
         {
-            ScrollToBottomDeferred();
+            TaskHelper.RunSafely(ScrollToBottomAfterLayoutAsync());
         }
     }
 
-    private static async void ScrollToBottomDeferred()
+    private static async Task ScrollToBottomAfterLayoutAsync()
     {
-        try
+        // The container recomputes its scroll range during the next frame's
+        // layout pass, so the scroll bar maximum is only meaningful afterwards.
+        await GodotFrames.NextProcessFrameAsync();
+
+        // The overlay can be rebuilt or freed while waiting for that frame.
+        ScrollContainer? scroll = _scroll;
+        if (scroll == null || !GodotObject.IsInstanceValid(scroll))
         {
-            if (_scroll == null || !GodotObject.IsInstanceValid(_scroll))
-            {
-                return;
-            }
-
-            if (Engine.GetMainLoop() is SceneTree sceneTree)
-            {
-                await sceneTree.ToSignal(sceneTree, SceneTree.SignalName.ProcessFrame);
-            }
-
-            VScrollBar? bar = _scroll.GetVScrollBar();
-            if (bar != null && GodotObject.IsInstanceValid(bar))
-            {
-                _scroll.ScrollVertical = (int)bar.MaxValue;
-            }
+            return;
         }
-        catch (Exception ex)
+
+        VScrollBar? bar = scroll.GetVScrollBar();
+        if (bar != null && GodotObject.IsInstanceValid(bar))
         {
-            MainFile.Logger.Debug($"Failed to scroll history to bottom: {ex.Message}");
+            scroll.ScrollVertical = (int)bar.MaxValue;
         }
     }
 

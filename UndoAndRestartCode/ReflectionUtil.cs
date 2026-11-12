@@ -8,6 +8,7 @@ internal static class ReflectionUtil
         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
     private static readonly Dictionary<(Type Type, string Name), FieldInfo?> FieldCache = new();
+    private static readonly Dictionary<(Type Type, string Name), FieldInfo?> StaticFieldCache = new();
     private static readonly Dictionary<(Type Type, string Name), MethodInfo?> MethodCache = new();
     private static readonly Dictionary<(Type Type, string Name, string Signature), MethodInfo?>
         ExactMethodCache = new();
@@ -119,9 +120,15 @@ internal static class ReflectionUtil
 
     public static T? GetStaticField<T>(Type type, string name)
     {
-        FieldInfo? field = type.GetField(
-            name,
-            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        (Type, string) key = (type, name);
+        if (!StaticFieldCache.TryGetValue(key, out FieldInfo? field))
+        {
+            field = type.GetField(
+                name,
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            StaticFieldCache[key] = field;
+        }
+
         return field?.GetValue(null) is T value
             ? value
             : default;

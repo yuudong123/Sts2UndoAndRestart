@@ -1,9 +1,13 @@
+using MegaCrit.Sts2.Core.Nodes.Vfx;
+using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Entities.FoolArrows;
 using System.Collections;
 using System.Reflection;
 using Godot;
 using MegaCrit.Sts2.addons.mega_text;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Combat.History;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
@@ -15,6 +19,7 @@ using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Orbs;
 using MegaCrit.Sts2.Core.Nodes.Potions;
@@ -57,8 +62,7 @@ internal sealed class CombatSnapshot
     public bool IsManualRestoreTarget => _currentSide == CombatSide.Player &&
                                          !_playerActionsDisabled &&
                                          !_endingPlayerTurnPhaseOne &&
-                                         !_endingPlayerTurnPhaseTwo &&
-                                         !Reason.Equals("EndPlayerTurnAction:after", StringComparison.Ordinal);
+                                         !_endingPlayerTurnPhaseTwo;
 
     private CombatSnapshot(CombatState state, string reason)
     {
@@ -206,12 +210,15 @@ internal sealed class CombatSnapshot
 
     private Player? LocalPlayer()
     {
-        return _players.Keys.FirstOrDefault();
+        return LocalContext.GetMe(_players.Keys) ?? _players.Keys.FirstOrDefault();
     }
 
-    public async Task RestoreAsync(
-        bool validate = true,
-        CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Restores this snapshot inside the caller's restore lock. Validation is the
+    /// caller's job because the expected invariants differ between a playable
+    /// checkpoint and a card-choice replay base.
+    /// </summary>
+    public async Task RestoreAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureActionRuntimeIdle();
@@ -237,10 +244,6 @@ internal sealed class CombatSnapshot
         RestoreCardRuntimeStates();
         ClearTransientRelicActivationStates();
         await RestoreUiAsync(cancellationToken);
-        if (validate)
-        {
-            SnapshotValidator.ValidatePlayableState(_state);
-        }
     }
 
     private static void EnsureActionRuntimeIdle()
@@ -362,10 +365,15 @@ internal sealed class CombatSnapshot
             playerState.RestorePiles();
         }
 
+        foreach (PlayerState playerState in _players.Values)
+        {
+            playerState.RestoreArrows();
+        }
+
         foreach (CardModel card in liveCards.Where(card => !savedCards.Contains(card)))
         {
             card.HasBeenRemovedFromState = true;
-            ReflectionUtil.SetField(card, "_owner", null);
+            ReflectionUtil.SetRequiredField(card, "_owner", null);
         }
     }
 
@@ -382,6 +390,8 @@ internal sealed class CombatSnapshot
         card.InvokeEnergyCostChanged();
         ReflectionUtil.GetField<Action>(card, "StarCostChanged")?.Invoke();
         ReflectionUtil.GetField<Action>(card, "KeywordsChanged")?.Invoke();
+        // 0.113: extra replays this turn are shown on the card.
+        ReflectionUtil.GetField<Action>(card, "ReplayCountChanged")?.Invoke();
     }
 
     private void RestoreHistory()
@@ -407,6 +417,7 @@ internal sealed class CombatSnapshot
         RefreshPotionUi();
         RefreshRelicUi();
         RefreshOrbUi();
+        RefreshArrowUi();
         ClearTransientCardPlayUi();
         NormalizeHandInteractionState();
         RefreshHandUi();
@@ -448,6 +459,10 @@ internal sealed class CombatSnapshot
         ReflectionUtil.GetRequiredField<HashSet<Player>>(
             turnState,
             "<PlayersReadyToBeginEnemyTurn>k__BackingField").Clear();
+        // 0.113: players who ended the turn with canBackOut: false (Void Form, death).
+        ReflectionUtil.GetRequiredField<HashSet<Player>>(
+            turnState,
+            "<PlayersThatCannotUnEndTurn>k__BackingField").Clear();
         ReflectionUtil.GetRequiredField<Dictionary<Player, int>>(manager, "_cardOrPotionEffectDepth").Clear();
         ReflectionUtil.ReplaceList(
             ReflectionUtil.GetRequiredField<List<Player>>(
@@ -528,33 +543,30 @@ internal sealed class CombatSnapshot
 
     private void RefreshPotionUi()
     {
-        Player? localPlayer = LocalPlayer();
-        foreach ((Player player, PlayerState state) in _players)
+        Player? player = LocalPlayer();
+        if (player == null || !_players.TryGetValue(player, out PlayerState? state))
         {
-            if (!ReferenceEquals(player, localPlayer))
-            {
-                continue;
-            }
-
-            NPotionContainer? container = NRun.Instance?.GlobalUi?.TopBar?.PotionContainer;
-            List<NPotionHolder>? holders = container != null ? ReflectionUtil.GetField<List<NPotionHolder>>(container, "_holders") : null;
-            if (container == null || holders == null)
-            {
-                return;
-            }
-
-            ReflectionUtil.Method(container.GetType(), "GrowPotionHolders", typeof(int))?.Invoke(container, new object?[] { player.MaxPotionCount });
-            holders = ReflectionUtil.GetField<List<NPotionHolder>>(container, "_holders") ?? holders;
-
-            for (int i = 0; i < holders.Count; i++)
-            {
-                PotionModel? desired = i < state.Potions.Count ? state.Potions[i] : null;
-                SyncPotionHolder(holders[i], desired);
-            }
-
-            ReflectionUtil.Method(container.GetType(), "UpdateNavigation")?.Invoke(container, null);
             return;
         }
+
+        NPotionContainer? container = NRun.Instance?.GlobalUi?.TopBar?.PotionContainer;
+        if (container == null)
+        {
+            return;
+        }
+
+        ReflectionUtil.Method(container.GetType(), "GrowPotionHolders", typeof(int))?.Invoke(container, new object?[] { player.MaxPotionCount });
+        IReadOnlyList<NPotionHolder> holders = container.Holders;
+        for (int i = 0; i < holders.Count; i++)
+        {
+            PotionModel? desired = i < state.Potions.Count ? state.Potions[i] : null;
+            SyncPotionHolder(holders[i], desired);
+        }
+
+        // 0.113 moved potion focus navigation from NPotionContainer to NTopBar,
+        // which also refreshes the relic row. Growing holders directly raises none
+        // of the events the top bar listens to, so refresh it explicitly.
+        NRun.Instance?.GlobalUi?.TopBar?.UpdateNavigation();
     }
 
     private static void SyncPotionHolder(NPotionHolder holder, PotionModel? desired)
@@ -661,12 +673,8 @@ internal sealed class CombatSnapshot
         {
             add?.Invoke(inventory, new object?[] { localPlayer.Relics[index], true, index });
         }
-        ReflectionUtil.Method(inventory.GetType(), "UpdateNavigation")?.Invoke(inventory, null);
-        NTopBar? topBar = NRun.Instance?.GlobalUi?.TopBar;
-        if (topBar != null)
-        {
-            ReflectionUtil.Method(topBar.GetType(), "UpdateNavigation")?.Invoke(topBar, null);
-        }
+        // NTopBar.UpdateNavigation also rebuilds the relic inventory navigation.
+        NRun.Instance?.GlobalUi?.TopBar?.UpdateNavigation();
     }
 
     private static void RefreshRelicHolder(NRelicInventoryHolder holder)
@@ -723,27 +731,96 @@ internal sealed class CombatSnapshot
         }
     }
 
-    private void RefreshOrbUi()
+    /// <summary>
+    /// Fool arrows (0.113): the arrow bar and the arrows stuck in creatures only
+    /// update from events. Impaled-arrow visuals are dropped without their
+    /// retrieve animation and rebuilt from each ImpaledPower, the same way
+    /// ArrowCmd creates them when an arrow hits.
+    /// </summary>
+    private void RefreshArrowUi()
     {
-        Player? localPlayer = LocalPlayer();
-        foreach ((Player player, PlayerState state) in _players)
+        NCombatRoom? room = NCombatRoom.Instance;
+        if (room == null)
         {
-            if (!ReferenceEquals(player, localPlayer))
-            {
-                continue;
-            }
-
-            NCreature? creatureNode = NCombatRoom.Instance?.GetCreatureNode(player.Creature);
-            NOrbManager? manager = creatureNode?.OrbManager;
-            if (creatureNode == null || manager == null)
-            {
-                return;
-            }
-
-            SyncOrbManager(manager, state.Orbs, state.OrbCapacity);
-            ReflectionUtil.Method(creatureNode.GetType(), "SetOrbManagerPosition")?.Invoke(creatureNode, null);
             return;
         }
+
+        try
+        {
+            foreach (NCreature node in room.CreatureNodes.Concat(room.RemovingCreatureNodes).ToList())
+            {
+                if (!GodotObject.IsInstanceValid(node))
+                {
+                    continue;
+                }
+
+                foreach (NImpaledArrowVfx arrow in node.Visuals.GetChildren().OfType<NImpaledArrowVfx>().ToList())
+                {
+                    // Leaving the tree unsubscribes it from its slot and frees its spine slot nodes.
+                    node.Visuals.RemoveChild(arrow);
+                    arrow.QueueFreeSafely();
+                }
+            }
+
+            foreach (Player player in _players.Keys)
+            {
+                PlayerCombatState? combatState = player.PlayerCombatState;
+                if (combatState == null)
+                {
+                    continue;
+                }
+
+                foreach (ArrowSlot slot in combatState.Arrows)
+                {
+                    ReflectionUtil.GetField<Action>(slot, "ArrowStatusUpdated")?.Invoke();
+                }
+
+                ReflectionUtil.GetField<Action>(combatState, "ArrowsChanged")?.Invoke();
+            }
+
+            foreach (Creature creature in CurrentCreatures())
+            {
+                NCreature? node = room.GetCreatureNode(creature);
+                if (node == null || !GodotObject.IsInstanceValid(node) || !creature.IsAlive)
+                {
+                    continue;
+                }
+
+                foreach (ImpaledPower power in creature.Powers.OfType<ImpaledPower>())
+                {
+                    foreach (ArrowSlot slot in power.Arrows)
+                    {
+                        if (slot.Status != ArrowStatus.Destroyed && NImpaledArrowVfx.Create(creature, slot) is { } arrow)
+                        {
+                            node.Visuals.AddChildSafely(arrow);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MainFile.Logger.Warn($"Failed to refresh Fool arrow UI while restoring: {ex.Message}");
+        }
+    }
+
+    private void RefreshOrbUi()
+    {
+        Player? player = LocalPlayer();
+        if (player == null || !_players.TryGetValue(player, out PlayerState? state))
+        {
+            return;
+        }
+
+        NCreature? creatureNode = NCombatRoom.Instance?.GetCreatureNode(player.Creature);
+        NOrbManager? manager = creatureNode?.OrbManager;
+        if (creatureNode == null || manager == null)
+        {
+            return;
+        }
+
+        SyncOrbManager(manager, state.Orbs, state.OrbCapacity);
+        ReflectionUtil.Method(creatureNode.GetType(), "SetOrbManagerPosition")?.Invoke(creatureNode, null);
     }
 
     private static void SyncOrbManager(NOrbManager manager, IReadOnlyList<OrbModel> desiredOrbs, int capacity)
@@ -808,7 +885,7 @@ internal sealed class CombatSnapshot
             }
 
             ReflectionUtil.Method(manager.GetType(), "UpdateControllerNavigation")?.Invoke(manager, null);
-            ReflectionUtil.Method(manager.GetType(), "UpdateVisuals", typeof(OrbEvokeType))?.Invoke(manager, new object?[] { OrbEvokeType.None });
+            manager.UpdateVisuals(OrbEvokeType.None);
         }
         catch (Exception ex)
         {
@@ -862,7 +939,7 @@ internal sealed class CombatSnapshot
         {
             if (!TryUpdateHandHolder(holder))
             {
-                DetachUnusableHolder(hand, holder);
+                RetireHandHolder(hand, holder);
             }
         }
 
@@ -875,7 +952,21 @@ internal sealed class CombatSnapshot
             CardModel? model = holder.CardNode?.Model;
             if (model == null || !restoredCards.Contains(model) || !holderCards.Add(model))
             {
-                hand.RemoveCardHolder(holder);
+                RetireHandHolder(hand, holder);
+            }
+        }
+
+        // 0.113 NPlayerHand.Add refuses a second holder for the same model, also
+        // counting holders that await the play queue: it frees the new node and
+        // returns the old holder. An awaiting holder for a card that is back in
+        // the restored hand would then swallow the rebuilt holder.
+        HashSet<NHandCardHolder>? awaitingHolders =
+            ReflectionUtil.GetField<HashSet<NHandCardHolder>>(hand, "_holdersAwaitingQueue");
+        foreach (NHandCardHolder awaiting in awaitingHolders?.ToList() ?? new List<NHandCardHolder>())
+        {
+            if (awaiting.CardNode?.Model is { } awaitingModel && restoredCards.Contains(awaitingModel))
+            {
+                RetireHandHolder(hand, awaiting);
             }
         }
 
@@ -890,6 +981,13 @@ internal sealed class CombatSnapshot
                 if (node != null)
                 {
                     NHandCardHolder createdHolder = hand.Add(node, i);
+                    if (!ReferenceEquals(createdHolder.CardNode, node))
+                    {
+                        // The game already freed (pooled) our node; never touch it again.
+                        throw new InvalidOperationException(
+                            $"Hand refused the restored card node for {card.Id}: another holder already shows it.");
+                    }
+
                     createdHolder.UpdateCard();
                 }
             }
@@ -1068,7 +1166,7 @@ internal sealed class CombatSnapshot
             holder.Visible = true;
             if (!TryUpdateHandHolder(holder))
             {
-                DetachUnusableHolder(hand, holder);
+                RetireHandHolder(hand, holder);
             }
         }
 
@@ -1100,7 +1198,7 @@ internal sealed class CombatSnapshot
         {
             if (!TryGetUsableCardNode(holder, out NCard? usableCardNode))
             {
-                DetachUnusableHolder(hand, holder);
+                RetireHandHolder(hand, holder);
                 continue;
             }
 
@@ -1108,7 +1206,7 @@ internal sealed class CombatSnapshot
             CardModel? card = cardNode.Model;
             if (card == null)
             {
-                DetachUnusableHolder(hand, holder);
+                RetireHandHolder(hand, holder);
                 continue;
             }
 
@@ -1121,7 +1219,7 @@ internal sealed class CombatSnapshot
                 continue;
             }
 
-            hand.RemoveCardHolder(holder);
+            RetireHandHolder(hand, holder);
         }
     }
 
@@ -1227,7 +1325,7 @@ internal sealed class CombatSnapshot
         {
             if (ShouldDetach(holder))
             {
-                DetachUnusableHolder(hand, holder);
+                RetireHandHolder(hand, holder);
             }
         }
 
@@ -1241,7 +1339,7 @@ internal sealed class CombatSnapshot
             {
                 if (ShouldDetach(holder))
                 {
-                    DetachUnusableHolder(hand, holder);
+                    RetireHandHolder(hand, holder);
                 }
             }
         }
@@ -1257,12 +1355,21 @@ internal sealed class CombatSnapshot
         {
             if (ShouldDetach(holder))
             {
-                DetachUnusableHolder(hand, holder);
+                RetireHandHolder(hand, holder);
             }
         }
     }
 
-    private static void DetachUnusableHolder(NPlayerHand hand, NCardHolder holder)
+    /// <summary>
+    /// Removes a hand holder that the restored hand no longer projects.
+    /// Vanilla RemoveCardHolder only detaches the card, orphaning a pooled NCard,
+    /// and freeing a holder with its card attached destroys that pooled NCard
+    /// behind NodePool's back. Here the holder leaves the tree with a healthy card
+    /// still attached (so its _ExitTree can unsubscribe through the model), then
+    /// the card is detached and retired through the shared pool rule. Layout is
+    /// refreshed once by RefreshHandUi.
+    /// </summary>
+    private static void RetireHandHolder(NPlayerHand hand, NCardHolder holder)
     {
         if (holder is NHandCardHolder handHolder)
         {
@@ -1277,13 +1384,16 @@ internal sealed class CombatSnapshot
             return;
         }
 
-        // Keep a healthy CardNode attached while leaving the tree so vanilla can
-        // unsubscribe from its model. Only sever a disposed node that cannot run
-        // the normal exit path safely.
-        if (!TryGetUsableCardNode(holder, out _))
+        // Same focus hand-off as vanilla RemoveCardHolder.
+        bool hadFocus = holder.HasFocus();
+
+        // Only sever a disposed card node that cannot run the normal exit path.
+        bool hasUsableCard = TryGetUsableCardNode(holder, out NCard? cardNode);
+        if (!hasUsableCard)
         {
             ReflectionUtil.SetField(holder, "<CardNode>k__BackingField", null);
         }
+
         try
         {
             Node? parent = holder.GetParent();
@@ -1297,9 +1407,20 @@ internal sealed class CombatSnapshot
             // QueueFree below is still the best-effort final cleanup.
         }
 
+        if (hasUsableCard && GodotObject.IsInstanceValid(holder))
+        {
+            holder.Clear();
+            TransientCardVfxCleanup.RetireCardNode(cardNode!);
+        }
+
         if (GodotObject.IsInstanceValid(holder) && !holder.IsQueuedForDeletion())
         {
             holder.QueueFreeSafely();
+        }
+
+        if (hadFocus)
+        {
+            hand.DefaultFocusedControl.TryGrabFocus();
         }
     }
 
@@ -1372,10 +1493,7 @@ internal sealed class CombatSnapshot
                 MainFile.Logger.Warn($"Failed to return interrupted card holder to hand: {ex.Message}");
                 try
                 {
-                    if (holder.GetParent() != null)
-                    {
-                        hand.RemoveCardHolder(holder);
-                    }
+                    RetireHandHolder(hand, holder);
                 }
                 catch (Exception removeEx)
                 {
@@ -1404,7 +1522,7 @@ internal sealed class CombatSnapshot
                 ReflectionUtil.GetField<Tween>(item, "currentTween")?.Kill();
                 if (ReflectionUtil.GetField<NCard>(item, "card") is { } queuedCard)
                 {
-                    RemoveCardNodeImmediately(queuedCard);
+                    TransientCardVfxCleanup.RetireCardNode(queuedCard);
                 }
             }
 
@@ -1413,7 +1531,7 @@ internal sealed class CombatSnapshot
 
         foreach (NCard card in playQueue.GetChildren().OfType<NCard>().ToList())
         {
-            RemoveCardNodeImmediately(card);
+            TransientCardVfxCleanup.RetireCardNode(card);
         }
     }
 
@@ -1427,7 +1545,7 @@ internal sealed class CombatSnapshot
 
         foreach (NCard card in ui.GetChildren().OfType<NCard>().ToList())
         {
-            RemoveCardNodeImmediately(card);
+            TransientCardVfxCleanup.RetireCardNode(card);
         }
     }
 
@@ -1441,7 +1559,7 @@ internal sealed class CombatSnapshot
 
         foreach (NCard card in playContainer.GetChildren().OfType<NCard>().ToList())
         {
-            RemoveCardNodeImmediately(card);
+            TransientCardVfxCleanup.RetireCardNode(card);
         }
     }
 
@@ -1459,29 +1577,6 @@ internal sealed class CombatSnapshot
         ReflectionUtil.GetField<IDictionary>(ui, "_originalPlayContainerCardScales")?.Clear();
     }
 
-    private static void RemoveCardNodeImmediately(NCard node)
-    {
-        if (!GodotObject.IsInstanceValid(node))
-        {
-            return;
-        }
-
-        try
-        {
-            node.PlayPileTween?.Kill();
-            node.PlayPileTween = null;
-            ReflectionUtil.GetField<Tween>(node, "<RandomizeCostTween>k__BackingField")?.Kill();
-            ReflectionUtil.SetField(node, "<RandomizeCostTween>k__BackingField", null);
-        }
-        catch
-        {
-            // 선택 트윈을 완벽히 정리하는 것보다 카드 노드를 제거하는 게 더 중요함.
-        }
-
-        node.GetParent()?.RemoveChild(node);
-        node.QueueFreeSafely();
-    }
-
     private async Task RefreshCreatureUiAsync(CancellationToken cancellationToken)
     {
         List<Task> intentRefreshes = new();
@@ -1497,8 +1592,13 @@ internal sealed class CombatSnapshot
             RefreshPowerContainer(node, creature);
             NormalizeCreatureInteraction(node, creature);
             ReflectionUtil.Method(node.GetType(), "UpdateBounds", typeof(Node))?.Invoke(node, new object?[] { node.Visuals });
-            Node? stateDisplay = ReflectionUtil.GetField<Node>(node, "_stateDisplay");
-            ReflectionUtil.Method(stateDisplay?.GetType() ?? typeof(Node), "RefreshValues")?.Invoke(stateDisplay!, null);
+            NCreatureStateDisplay? stateDisplay =
+                ReflectionUtil.GetField<NCreatureStateDisplay>(node, "_stateDisplay");
+            if (stateDisplay != null)
+            {
+                ReflectionUtil.Method(typeof(NCreatureStateDisplay), "RefreshValues")
+                    ?.Invoke(stateDisplay, null);
+            }
             if (creature.IsEnemy && creature.IsAlive)
             {
                 intentRefreshes.Add(node.RefreshIntents());
@@ -1512,20 +1612,22 @@ internal sealed class CombatSnapshot
         }
     }
 
-    private static void NormalizeCreatureInteraction(NCreature node, Creature creature)
+    private void NormalizeCreatureInteraction(NCreature node, Creature creature)
     {
-        bool shouldInteract = creature.IsAlive && (!creature.IsMonster || creature.Monster?.IsHealthBarVisible != false);
         try
         {
-            if (creature.IsAlive)
+            // 0.113: interactability is node state made of two flags. The death flag
+            // is only reset by a revive animation, so a node restored from before a
+            // kill stays untargetable unless it is reset here. The other flag is
+            // gameplay-driven (flee, reattach) and comes from the snapshot.
+            ReflectionUtil.SetRequiredField(node, "_interactionAllowedBecauseAlive", creature.IsAlive);
+            bool allowed = _visuals.InteractionAllowed(creature) ??
+                           ReflectionUtil.GetRequiredField<bool>(node, "_interactionAllowed");
+            // SetIsInteractable applies monster, remote-pet and death rules itself and
+            // sets hitbox mouse/focus and health-bar visibility to match.
+            node.SetIsInteractable(allowed, changeVisibilityImmediately: true);
+            if (node.IsInteractable)
             {
-                node.Hitbox.FocusMode = Control.FocusModeEnum.All;
-            }
-
-            ReflectionUtil.Method(node.GetType(), "ToggleIsInteractable", typeof(bool))?.Invoke(node, new object?[] { shouldInteract });
-            if (shouldInteract)
-            {
-                node.Hitbox.MouseFilter = Control.MouseFilterEnum.Stop;
                 node.Hitbox.Visible = true;
             }
         }
@@ -1654,7 +1756,7 @@ internal sealed class CombatSnapshot
         try
         {
             ReflectionUtil.Method(CombatManager.Instance.StateTracker.GetType(), "NotifyCombatStateChanged", typeof(string))
-                ?.Invoke(CombatManager.Instance.StateTracker, new object?[] { "UndoAndRedo restore" });
+                ?.Invoke(CombatManager.Instance.StateTracker, new object?[] { "UndoAndRestart restore" });
         }
         catch (Exception ex)
         {
@@ -1741,15 +1843,15 @@ internal sealed class CombatSnapshot
         {
             creature.CombatId = _combatId;
             creature.SlotName = _slotName;
-            ReflectionUtil.SetField(creature, "_currentHp", Math.Max(0, _currentHp));
-            ReflectionUtil.SetField(creature, "_maxHp", Math.Max(0, _maxHp));
-            ReflectionUtil.SetField(creature, "_block", Math.Max(0, _block));
-            ReflectionUtil.SetField(
+            ReflectionUtil.SetRequiredField(creature, "_currentHp", Math.Max(0, _currentHp));
+            ReflectionUtil.SetRequiredField(creature, "_maxHp", Math.Max(0, _maxHp));
+            ReflectionUtil.SetRequiredField(creature, "_block", Math.Max(0, _block));
+            ReflectionUtil.SetRequiredField(
                 creature,
                 "<MonsterMaxHpBeforeModification>k__BackingField",
                 _monsterMaxHpBeforeModification);
             creature.HpDisplay = _hpDisplay;
-            ReflectionUtil.SetField(creature, "_petOwner", _petOwner);
+            ReflectionUtil.SetRequiredField(creature, "_petOwner", _petOwner);
 
             List<PowerModel> powers = ReflectionUtil.GetRequiredField<List<PowerModel>>(creature, "_powers");
             ReflectionUtil.ReplaceList(powers, _powers);
@@ -1769,8 +1871,10 @@ internal sealed class CombatSnapshot
         private readonly List<OrbModel> _orbs;
         private readonly int _orbCapacity;
         private readonly List<Creature> _pets;
+        private readonly List<ArrowSlot> _arrows;
+        private readonly List<(ArrowStatus Status, bool DestroyAfterImpaled)> _arrowStates;
         private readonly Dictionary<PileType, List<CardModel>> _piles;
-        private readonly object? _phase;
+        private readonly PlayerTurnPhase? _phase;
         private readonly int _gold;
         private readonly bool _isActiveForHooks;
         private readonly int _maxEnergy;
@@ -1803,8 +1907,8 @@ internal sealed class CombatSnapshot
             _relics = player.Relics.ToList();
             Energy = player.PlayerCombatState?.Energy ?? 0;
             Stars = player.PlayerCombatState?.Stars ?? 0;
-            TurnNumber = player.PlayerCombatState != null ? ReflectionUtil.GetField<int>(player.PlayerCombatState, "<TurnNumber>k__BackingField") : 1;
-            _phase = player.PlayerCombatState != null ? ReflectionUtil.GetField<object>(player.PlayerCombatState, "_phase") : null;
+            TurnNumber = player.PlayerCombatState?.TurnNumber ?? 1;
+            _phase = player.PlayerCombatState?.Phase;
             _gold = player.Gold;
             _isActiveForHooks = player.IsActiveForHooks;
             _maxEnergy = player.MaxEnergy;
@@ -1821,6 +1925,8 @@ internal sealed class CombatSnapshot
             _orbs = player.PlayerCombatState?.OrbQueue.Orbs.ToList() ?? new List<OrbModel>();
             _orbCapacity = player.PlayerCombatState?.OrbQueue.Capacity ?? 0;
             _pets = player.PlayerCombatState?.Pets.ToList() ?? new List<Creature>();
+            _arrows = player.PlayerCombatState?.Arrows.ToList() ?? new List<ArrowSlot>();
+            _arrowStates = _arrows.Select(arrow => (arrow.Status, arrow.DestroyAfterImpaled)).ToList();
             _piles = player.Piles.ToDictionary(pile => pile.Type, pile => pile.Cards.ToList());
         }
 
@@ -1833,7 +1939,7 @@ internal sealed class CombatSnapshot
         {
             player.PlayerRng.LoadFromSerializable(_rng);
             player.Gold = _gold;
-            ReflectionUtil.SetField(player, "<IsActiveForHooks>k__BackingField", _isActiveForHooks);
+            ReflectionUtil.SetRequiredField(player, "<IsActiveForHooks>k__BackingField", _isActiveForHooks);
             player.MaxEnergy = _maxEnergy;
             player.BaseOrbSlotCount = _baseOrbSlotCount;
             player.CanUseOrRemovePotions = _canUseOrRemovePotions;
@@ -1848,12 +1954,12 @@ internal sealed class CombatSnapshot
 
             if (player.PlayerCombatState != null)
             {
-                ReflectionUtil.SetField(player.PlayerCombatState, "_energy", Energy);
-                ReflectionUtil.SetField(player.PlayerCombatState, "_stars", Stars);
-                ReflectionUtil.SetField(player.PlayerCombatState, "<TurnNumber>k__BackingField", TurnNumber);
-                if (_phase != null)
+                ReflectionUtil.SetRequiredField(player.PlayerCombatState, "_energy", Energy);
+                ReflectionUtil.SetRequiredField(player.PlayerCombatState, "_stars", Stars);
+                ReflectionUtil.SetRequiredField(player.PlayerCombatState, "<TurnNumber>k__BackingField", TurnNumber);
+                if (_phase.HasValue)
                 {
-                    ReflectionUtil.SetField(player.PlayerCombatState, "_phase", _phase);
+                    ReflectionUtil.SetRequiredField(player.PlayerCombatState, "_phase", _phase.Value);
                 }
                 RestorePets(player.PlayerCombatState);
                 RestoreOrbs(player.PlayerCombatState);
@@ -1861,6 +1967,28 @@ internal sealed class CombatSnapshot
 
             RestorePotions(player);
             RestoreRelics(player);
+        }
+
+        /// <summary>
+        /// Fool arrow slots (0.113). Runs after RestorePiles: adding a Shoot card to
+        /// a combat pile can grant a slot as a side effect. Status is written to the
+        /// field so the slot's event does not animate stale arrow visuals; the UI is
+        /// refreshed afterwards by RefreshArrowUi.
+        /// </summary>
+        public void RestoreArrows()
+        {
+            if (_player.PlayerCombatState == null)
+            {
+                return;
+            }
+
+            List<ArrowSlot> live = ReflectionUtil.GetRequiredField<List<ArrowSlot>>(_player.PlayerCombatState, "_arrows");
+            ReflectionUtil.ReplaceList(live, _arrows);
+            for (int i = 0; i < _arrows.Count; i++)
+            {
+                ReflectionUtil.SetRequiredField(_arrows[i], "_status", _arrowStates[i].Status);
+                _arrows[i].DestroyAfterImpaled = _arrowStates[i].DestroyAfterImpaled;
+            }
         }
 
         public void RestorePiles()
@@ -1884,7 +2012,7 @@ internal sealed class CombatSnapshot
                 for (int index = 0; index < cards.Count; index++)
                 {
                     CardModel card = cards[index];
-                    ReflectionUtil.SetField(card, "_owner", _player);
+                    ReflectionUtil.SetRequiredField(card, "_owner", _player);
                     card.HasBeenRemovedFromState = false;
                     pile.AddInternal(card, index, silent: true);
                 }
@@ -1948,11 +2076,11 @@ internal sealed class CombatSnapshot
             List<OrbModel> orbs = ReflectionUtil.GetRequiredField<List<OrbModel>>(queue, "_orbs");
             ReflectionUtil.ReplaceList(orbs, _orbs);
 
-            ReflectionUtil.SetField(queue, "<Capacity>k__BackingField", _orbCapacity);
+            ReflectionUtil.SetRequiredField(queue, "<Capacity>k__BackingField", _orbCapacity);
             foreach (OrbModel orb in _orbs)
             {
-                ReflectionUtil.SetField(orb, "_owner", _player);
-                ReflectionUtil.SetField(orb, "<HasBeenRemovedFromState>k__BackingField", false);
+                ReflectionUtil.SetRequiredField(orb, "_owner", _player);
+                ReflectionUtil.SetRequiredField(orb, "<HasBeenRemovedFromState>k__BackingField", false);
             }
         }
 
@@ -1967,9 +2095,9 @@ internal sealed class CombatSnapshot
                     continue;
                 }
 
-                ReflectionUtil.SetField(potion, "_owner", player);
-                ReflectionUtil.SetField(potion, "<HasBeenRemovedFromState>k__BackingField", false);
-                ReflectionUtil.SetField(potion, "<IsQueued>k__BackingField", false);
+                ReflectionUtil.SetRequiredField(potion, "_owner", player);
+                ReflectionUtil.SetRequiredField(potion, "<HasBeenRemovedFromState>k__BackingField", false);
+                ReflectionUtil.SetRequiredField(potion, "<IsQueued>k__BackingField", false);
             }
         }
 
@@ -1985,15 +2113,15 @@ internal sealed class CombatSnapshot
             ReflectionUtil.ReplaceList(relics, _relics);
             foreach (RelicModel relic in relics)
             {
-                ReflectionUtil.SetField(relic, "_owner", player);
-                ReflectionUtil.SetField(relic, "<HasBeenRemovedFromState>k__BackingField", false);
+                ReflectionUtil.SetRequiredField(relic, "_owner", player);
+                ReflectionUtil.SetRequiredField(relic, "<HasBeenRemovedFromState>k__BackingField", false);
                 AddPlayerFlashHandler(player, relic);
             }
 
             foreach (RelicModel relic in allRelics.Except(_relics))
             {
-                ReflectionUtil.SetField(relic, "_owner", null);
-                ReflectionUtil.SetField(relic, "<HasBeenRemovedFromState>k__BackingField", true);
+                ReflectionUtil.SetRequiredField(relic, "_owner", null);
+                ReflectionUtil.SetRequiredField(relic, "<HasBeenRemovedFromState>k__BackingField", true);
             }
         }
 

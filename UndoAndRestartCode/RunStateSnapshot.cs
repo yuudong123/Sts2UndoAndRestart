@@ -46,7 +46,7 @@ internal sealed class RunStateSnapshot
         _rng.Restore(_runState.Rng);
         _odds.Restore(_runState.Odds);
         _sharedRelicGrabBag.Restore(_runState.SharedRelicGrabBag);
-        ReflectionUtil.SetField(_runState, "<NextRoomId>k__BackingField", _nextRoomId);
+        ReflectionUtil.SetRequiredField(_runState, "<NextRoomId>k__BackingField", _nextRoomId);
         _combatRoom?.Restore();
     }
 
@@ -74,8 +74,8 @@ internal sealed class RunStateSnapshot
 
         public void Restore()
         {
-            ReflectionUtil.SetField(_room, "_isPreFinished", _isPreFinished);
-            ReflectionUtil.SetField(_room, "<GoldProportion>k__BackingField", _goldProportion);
+            ReflectionUtil.SetRequiredField(_room, "_isPreFinished", _isPreFinished);
+            ReflectionUtil.SetRequiredField(_room, "<GoldProportion>k__BackingField", _goldProportion);
 
             Dictionary<Player, List<Reward>> destination =
                 ReflectionUtil.GetRequiredField<Dictionary<Player, List<Reward>>>(_room, "_extraRewards");

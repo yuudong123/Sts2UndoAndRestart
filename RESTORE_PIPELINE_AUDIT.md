@@ -82,6 +82,25 @@ safely, and defers `NodePool.Free`. Direct `QueueFree()` bypasses that contract.
 All restore-owned retirement of combat cards, holders, potions, relics, orbs,
 powers, and Sovereign Blade VFX now uses `QueueFreeSafely()`.
 
+`NodePool.Free` does not check whether the node is still alive, and `Get` hands
+out whatever is on its free list. A pooled `NCard` therefore must reach the pool
+exactly once and must never be destroyed while the pool can still see it:
+
+- a second return lets the pool give one node to two owners;
+- destroying a pooled card (raw `QueueFree`, or freeing a non-pooled parent such
+  as a hand holder with the card still attached) can leave a disposed object on
+  the free list, which later fails in `NCard.OnReturnedFromPool` during a draw
+  and kills the combat turn loop.
+
+Every restore path retires card nodes through
+`TransientCardVfxCleanup.RetireCardNode`. A card referenced by an active
+old-timeline visual task is only hidden, and parked on the combat UI when it
+sits where `NCard.FindOnTable` searches (play container/queue) or has no
+parent; the task returns it when it finishes. Hand holders are retired through
+`CombatSnapshot.RetireHandHolder`, which detaches the card before the holder is
+freed. An idle quick-exhaust VFX that has not reached `_isFinishing` is left
+hidden: removing it or its card would free the card twice.
+
 ### Creature presentation cancellation
 
 `NCreature.AnimDie` continues after the combat model has changed. It can await

@@ -99,7 +99,7 @@ Assigning `null` to `NCreature.DeathAnimationTask` does not cancel a running `An
   - Redo: right arrow
   - Restart floor: `F5`
 
-If the player binds a key through the game's input settings, that binding takes priority over the fallback key. Undo/redo hotkeys are ignored while the player is typing into console-like controls, `LineEdit`, or `TextEdit`.
+If the player binds a key for an action in either the mouse+keyboard or keyboard-only column of the input settings, that action's fallback key is disabled in every mode and only the bound key works. Keyboard-only mode never uses the ←/→ fallbacks because the arrow keys drive vanilla navigation there. Undo/redo hotkeys are ignored while the player is typing into console-like controls, `LineEdit`, or `TextEdit`.
 The M4/M5 option adds Godot raw side-button events to the existing undo/redo path without replacing or disabling the keyboard bindings in the game's input settings.
 
 ## Multiplayer Policy

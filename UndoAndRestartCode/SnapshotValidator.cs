@@ -1,6 +1,7 @@
 using System.Collections;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -14,22 +15,6 @@ namespace UndoAndRestartCode;
 
 internal static class SnapshotValidator
 {
-    public static void ValidatePlayableState(CombatState state)
-    {
-        ValidateRestoredState(
-            state,
-            requirePlayerControl: true,
-            allowRestoreLock: false);
-    }
-
-    public static void ValidateCardChoiceReplayBaseState(CombatState state)
-    {
-        ValidateRestoredState(
-            state,
-            requirePlayerControl: false,
-            allowRestoreLock: false);
-    }
-
     public static void ValidatePlayableStateDuringRestore(CombatState state)
     {
         ValidateRestoredState(
@@ -270,7 +255,7 @@ internal static class SnapshotValidator
             errors.Add("The hand still has card holders awaiting play after restore.");
         }
 
-        Player? localPlayer = state.Players.FirstOrDefault();
+        Player? localPlayer = LocalContext.GetMe(state.Players) ?? state.Players.FirstOrDefault();
         CardPile? restoredHand = localPlayer?.PlayerCombatState?.Hand;
         if (restoredHand != null)
         {

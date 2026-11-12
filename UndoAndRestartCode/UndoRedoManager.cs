@@ -15,10 +15,6 @@ namespace UndoAndRestartCode;
 
 internal static class UndoRedoManager
 {
-    public const long LeftArrowKeyCode = 4194319;
-    public const long RightArrowKeyCode = 4194321;
-    public const long QuickRestartKeyCode = 4194336;
-
     private static readonly List<UndoCheckpoint> Checkpoints = new();
     private static readonly List<ActionHistoryEntry> ActionEntries = new();
     private static CombatState? _sessionState;
@@ -139,11 +135,6 @@ internal static class UndoRedoManager
             _pendingTurnStartTurnNumber = turnNumber;
             MainFile.Logger.Info($"Queued turn-start snapshot for turn {turnNumber}.");
         }
-    }
-
-    public static async Task CaptureAfterActionAsync(Task original, GameAction action, string reason)
-    {
-        await CaptureAfterActionAsync(original, action, reason, null);
     }
 
     public static async Task CaptureAfterActionAsync(
@@ -282,7 +273,7 @@ internal static class UndoRedoManager
     {
         for (int frame = 0; frame < 240 && _navigationInProgress; frame++)
         {
-            await AwaitProcessFramesAsync(1, CancellationToken.None);
+            await GodotFrames.NextProcessFrameAsync();
         }
 
         if (_navigationInProgress)
@@ -347,9 +338,7 @@ internal static class UndoRedoManager
             CardChoiceCheckpointService.InvalidateTimelineAsyncWork();
             _isRestoring = true;
             restoreScope.Reassert();
-            await replayBaseSnapshot.RestoreAsync(
-                validate: false,
-                cancellationToken);
+            await replayBaseSnapshot.RestoreAsync(cancellationToken);
             SnapshotValidator.ValidatePlayableStateDuringRestore(state);
 
             Checkpoints.RemoveRange(
@@ -391,15 +380,10 @@ internal static class UndoRedoManager
         }
     }
 
-    public static void CapturePlayerControlReady()
-    {
-        RequestPlayerControlReadyCapture("explicit player-control request");
-    }
-
     public static void RequestPlayerControlReadyCapture(string source)
     {
         int requestId = ++_readyCaptureRequestId;
-        _ = CapturePlayerControlReadyWhenStable(requestId, source);
+        TaskHelper.RunSafely(CapturePlayerControlReadyWhenStable(requestId, source));
     }
 
     public static void RequestForcedPlayerControlReadyCapture(string source)
@@ -866,7 +850,7 @@ internal static class UndoRedoManager
                     $"Waiting to restore via {source}: {blockReason}");
             }
 
-            await AwaitProcessFramesAsync(1, cancellationToken);
+            await GodotFrames.NextProcessFrameAsync(cancellationToken);
         }
 
         MainFile.Logger.Warn(
@@ -918,12 +902,10 @@ internal static class UndoRedoManager
         ClearPendingActionMetadata();
         CardChoiceCheckpointService.InvalidateTimelineAsyncWork();
 
-        bool restoreStarted = false;
         try
         {
             Stopwatch timer = Stopwatch.StartNew();
-            restoreStarted = true;
-            await snapshot.RestoreAsync(validate: false, cancellationToken);
+            await snapshot.RestoreAsync(cancellationToken);
             if (checkpoint.CardChoice == null)
             {
                 SnapshotValidator.ValidatePlayableStateDuringRestore(state);
@@ -960,14 +942,9 @@ internal static class UndoRedoManager
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             MainFile.Logger.Error($"Failed to restore snapshot: {ex}");
-            if (!restoreStarted)
-            {
-                return;
-            }
-
             try
             {
-                await rollbackSnapshot.RestoreAsync(validate: false, cancellationToken);
+                await rollbackSnapshot.RestoreAsync(cancellationToken);
                 _cursor = rollbackCursor;
                 if (rollbackCheckpoint?.CardChoice != null)
                 {
@@ -1008,24 +985,6 @@ internal static class UndoRedoManager
             throw new OperationCanceledException(
                 "The combat or timeline navigation request changed.",
                 cancellationToken);
-        }
-    }
-
-    private static async Task AwaitProcessFramesAsync(
-        int count,
-        CancellationToken cancellationToken)
-    {
-        for (int frame = 0; frame < count; frame++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (Engine.GetMainLoop() is SceneTree sceneTree)
-            {
-                await sceneTree.ToSignal(sceneTree, SceneTree.SignalName.ProcessFrame);
-            }
-            else
-            {
-                await Task.Delay(16, cancellationToken);
-            }
         }
     }
 
@@ -1081,11 +1040,10 @@ internal static class UndoRedoManager
             }
             catch
             {
+                // Release only what this call acquired, in reverse order.
                 if (queuesPaused)
                 {
-                    RunManager.Instance.ActionExecutor.Unpause();
                     RunManager.Instance.ActionQueueSet.UnpauseAllPlayerQueues();
-                    executorPaused = false;
                 }
 
                 if (executorPaused)
@@ -1234,14 +1192,7 @@ internal static class UndoRedoManager
                 MainFile.Logger.Info($"Waiting to capture PlayerControlReady via {source}: {blockReason}");
             }
 
-            if (Engine.GetMainLoop() is SceneTree sceneTree)
-            {
-                await sceneTree.ToSignal(sceneTree, SceneTree.SignalName.ProcessFrame);
-            }
-            else
-            {
-                await Task.Delay(16);
-            }
+            await GodotFrames.NextProcessFrameAsync();
         }
 
         MainFile.Logger.Info($"Gave up capturing PlayerControlReady via {source}: state did not become stable.");
@@ -1371,6 +1322,12 @@ internal static class UndoRedoManager
         }
 
         _pendingTurnStartTurnNumber = null;
+    }
+
+    public static int CurrentPlayerTurnNumber()
+    {
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        return state == null ? 1 : GetPlayerTurnNumber(state);
     }
 
     private static int GetPlayerTurnNumber(CombatState state)
