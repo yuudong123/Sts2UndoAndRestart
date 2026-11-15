@@ -39,12 +39,13 @@ internal static class ModSettingsPanelPatch
         bool savedShowHistory = UndoAndRestartConfig.ShowActionHistoryOverlay;
         bool savedIncludeCardChoices = UndoAndRestartConfig.IncludeCardChoiceSnapshots;
         bool savedEnableMouseSideButtons = UndoAndRestartConfig.EnableMouseSideButtons;
+        bool savedEnableScreenButtons = UndoAndRestartConfig.EnableScreenButtons;
 
         PanelContainer panel = new()
         {
             Name = PanelName,
             Position = new Vector2(0f, 318f),
-            CustomMinimumSize = new Vector2(560f, 288f),
+            CustomMinimumSize = new Vector2(560f, 324f),
         };
         StyleBoxFlat style = new()
         {
@@ -77,6 +78,9 @@ internal static class ModSettingsPanelPatch
         Button mouseSideButtonsToggle = CreateToggleButton(
             UndoText.EnableMouseSideButtons,
             savedEnableMouseSideButtons);
+        Button screenButtonsToggle = CreateToggleButton(
+            UndoText.EnableScreenButtons,
+            savedEnableScreenButtons);
 
         HBoxContainer snapshotRow = new();
         snapshotRow.AddThemeConstantOverride("separation", 10);
@@ -123,6 +127,7 @@ internal static class ModSettingsPanelPatch
         historyToggle.Toggled += _ => RefreshSaveButton();
         cardChoiceToggle.Toggled += _ => RefreshSaveButton();
         mouseSideButtonsToggle.Toggled += _ => RefreshSaveButton();
+        screenButtonsToggle.Toggled += _ => RefreshSaveButton();
         input.TextSubmitted += _ =>
         {
             if (!saveButton.Disabled)
@@ -140,6 +145,27 @@ internal static class ModSettingsPanelPatch
         box.AddChild(historyToggle);
         box.AddChild(cardChoiceToggle);
         box.AddChild(mouseSideButtonsToggle);
+        HBoxContainer screenButtonsRow = new();
+        screenButtonsRow.AddThemeConstantOverride("separation", 8);
+        Button resetPositionsButton = new()
+        {
+            Text = UndoText.ResetScreenButtonPositions,
+            CustomMinimumSize = new Vector2(120f, 30f),
+            FocusMode = Control.FocusModeEnum.None,
+            Disabled = UndoAndRestartConfig.ScreenUndoButtonPosition == null && UndoAndRestartConfig.ScreenRedoButtonPosition == null,
+        };
+        ApplyGameFont(resetPositionsButton, FontType.Bold);
+        resetPositionsButton.Pressed += () =>
+        {
+            if (UndoAndRestartConfig.SaveScreenButtonPositions(null, null))
+            {
+                resetPositionsButton.Disabled = true;
+                ScreenButtonsOverlay.Refresh();
+            }
+        };
+        screenButtonsRow.AddChild(screenButtonsToggle);
+        screenButtonsRow.AddChild(resetPositionsButton);
+        box.AddChild(screenButtonsRow);
         box.AddChild(snapshotRow);
         box.AddChild(hint);
         box.AddChild(warning);
@@ -157,7 +183,8 @@ internal static class ModSettingsPanelPatch
                     StringComparison.Ordinal) ||
                 historyToggle.ButtonPressed != savedShowHistory ||
                 cardChoiceToggle.ButtonPressed != savedIncludeCardChoices ||
-                mouseSideButtonsToggle.ButtonPressed != savedEnableMouseSideButtons;
+                mouseSideButtonsToggle.ButtonPressed != savedEnableMouseSideButtons ||
+                screenButtonsToggle.ButtonPressed != savedEnableScreenButtons;
             saveButton.Disabled = !changed;
             if (changed)
             {
@@ -180,7 +207,8 @@ internal static class ModSettingsPanelPatch
                     normalizedSnapshotLimit,
                     historyToggle.ButtonPressed,
                     cardChoiceToggle.ButtonPressed,
-                    mouseSideButtonsToggle.ButtonPressed))
+                    mouseSideButtonsToggle.ButtonPressed,
+                    screenButtonsToggle.ButtonPressed))
             {
                 status.Text = UndoText.SaveFailed;
                 status.AddThemeColorOverride("font_color", new Color(1f, 0.58f, 0.42f));
@@ -191,6 +219,7 @@ internal static class ModSettingsPanelPatch
             savedShowHistory = historyToggle.ButtonPressed;
             savedIncludeCardChoices = cardChoiceToggle.ButtonPressed;
             savedEnableMouseSideButtons = mouseSideButtonsToggle.ButtonPressed;
+            savedEnableScreenButtons = screenButtonsToggle.ButtonPressed;
             input.Text = normalizedSnapshotLimit.ToString();
             status.Text = "";
             savedIndicator.Text = "V";

@@ -86,3 +86,15 @@ undo and redo do nothing until this release.
 
 In-game checks are still required for visuals, rebound hotkeys, M4/M5, F5 floor
 restart and multiplayer blocking.
+
+## 0.113.1 Patch
+
+- 19 decompiled files changed; none is a Harmony target or a reflected member.
+  `NImpaledArrowVfx` gained Crusher/Rocket anchor slots, which Undo reaches
+  through the game's own `NImpaledArrowVfx.Create`.
+- Mod 0.113.1.1 also fixes F5 floor restart resetting the undo history after
+  the restored combat had already started, which dropped the checkpoint of a
+  start-of-turn card choice (Gambling Chip, Knowledge Demon's Dread dominion).
+- 33 headless scenarios pass on 0.113.1, including all twelve Dread dominions,
+  Gambling Chip and the on-screen buttons. F5 restart itself is only covered
+  in game.

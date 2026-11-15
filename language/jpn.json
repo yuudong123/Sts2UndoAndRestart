@@ -8,6 +8,8 @@
   "show_history_tab": "右上に行動履歴タブを表示",
   "include_card_choice_snapshots": "カード選択画面をスナップショットに含める",
   "enable_mouse_side_buttons": "マウスサイドボタン操作を追加（M4：元に戻す / M5：やり直す）",
+  "enable_screen_buttons": "画面に「元に戻す / やり直す」ボタンを表示（ドラッグで移動）",
+  "reset_screen_button_positions": "位置をリセット",
   "save": "保存",
   "save_failed": "設定を保存できませんでした。",
   "number_only": "数字のみを入力してください。",

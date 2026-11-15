@@ -143,6 +143,11 @@ internal static class FloorRestartService
                 TryMarkVisitedEvent(runState, eventRoom);
             }
 
+            // Reset before the room loads: a combat starts its first turn during the
+            // fade-in below, and turn-start card choices (Gambling Chip, Knowledge
+            // Demon's dominion) begin recording right away. Resetting afterwards
+            // dropped that recording, so the choice had no checkpoint to undo to.
+            UndoRedoManager.Reset();
             await runManager.LoadIntoLatestMapCoord(restoredRoom);
             RestoreEnemyPositions(savedEnemyPositions);
             RestoreMapDrawings(savedDrawings);
@@ -150,7 +155,6 @@ internal static class FloorRestartService
             fadedOut = false;
             await RestoreMapMarker(game, runState);
             CombatRuntimeStateCleanup.ClearCombatTurnFlags();
-            UndoRedoManager.Reset();
             MainFile.Logger.Info("F5 quick restart complete.");
         }
         catch (Exception ex)

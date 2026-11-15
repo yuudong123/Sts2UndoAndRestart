@@ -1211,7 +1211,15 @@ internal sealed class CombatSnapshot
             }
 
             int restoredIndex = FindCardIndexByReference(handPile.Cards, card);
-            if (restoredIndex >= 0)
+            // 0.113 NPlayerHand.Add pools the passed node when another holder (in the
+            // hand or awaiting the play queue) already shows this model, while the node
+            // is still a child of this holder: the holder's free would then destroy a
+            // pooled card. Let the existing holder keep the card and retire this one.
+            bool alreadyShown = GetAllHandContainerHolders(hand)
+                .Concat(ReflectionUtil.GetField<HashSet<NHandCardHolder>>(hand, "_holdersAwaitingQueue")
+                        ?? Enumerable.Empty<NHandCardHolder>())
+                .Any(existing => GodotObject.IsInstanceValid(existing) && ReferenceEquals(existing.CardNode?.Model, card));
+            if (restoredIndex >= 0 && !alreadyShown)
             {
                 holder.GetParent()?.RemoveChild(holder);
                 holder.QueueFreeSafely();

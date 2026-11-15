@@ -36,6 +36,8 @@ internal static class ActionHistoryOverlay
         {
             MainFile.Logger.Warn($"Failed to refresh undo stack overlay: {ex.Message}");
         }
+
+        ScreenButtonsOverlay.Refresh();
     }
 
     private static void EnsureCreated()

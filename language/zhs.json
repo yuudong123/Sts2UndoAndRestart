@@ -8,6 +8,8 @@
   "show_history_tab": "显示右上角的使用记录标签",
   "include_card_choice_snapshots": "将卡牌选择界面纳入快照",
   "enable_mouse_side_buttons": "添加鼠标侧键操作（M4：撤销 / M5：重做）",
+  "enable_screen_buttons": "在屏幕上显示撤销 / 重做按钮（可拖动）",
+  "reset_screen_button_positions": "重置位置",
   "save": "保存",
   "save_failed": "无法保存设置。",
   "number_only": "请只输入数字。",

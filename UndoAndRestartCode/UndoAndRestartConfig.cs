@@ -12,6 +12,10 @@ internal static class UndoAndRestartConfig
     public static bool ShowActionHistoryOverlay { get; private set; } = true;
     public static bool IncludeCardChoiceSnapshots { get; private set; } = true;
     public static bool EnableMouseSideButtons { get; private set; }
+    public static bool EnableScreenButtons { get; private set; } = true;
+    /// <summary>Dragged Undo button position as a fraction of the viewport; null = beside the energy orb.</summary>
+    public static Vector2? ScreenUndoButtonPosition { get; private set; }
+    public static Vector2? ScreenRedoButtonPosition { get; private set; }
     public static bool HasAcknowledgedFeatureAnnouncement { get; private set; }
 
     public static void Load()
@@ -30,6 +34,9 @@ internal static class UndoAndRestartConfig
             ShowActionHistoryOverlay = settings?.ShowActionHistoryOverlay ?? true;
             IncludeCardChoiceSnapshots = settings?.IncludeCardChoiceSnapshots ?? true;
             EnableMouseSideButtons = settings?.EnableMouseSideButtons ?? false;
+            EnableScreenButtons = settings?.EnableScreenButtons ?? true;
+            ScreenUndoButtonPosition = ToVector(settings?.ScreenUndoButtonPosition);
+            ScreenRedoButtonPosition = ToVector(settings?.ScreenRedoButtonPosition);
             HasAcknowledgedFeatureAnnouncement =
                 settings?.HasAcknowledgedFeatureAnnouncement ?? false;
         }
@@ -40,6 +47,9 @@ internal static class UndoAndRestartConfig
             ShowActionHistoryOverlay = true;
             IncludeCardChoiceSnapshots = true;
             EnableMouseSideButtons = false;
+            EnableScreenButtons = true;
+            ScreenUndoButtonPosition = null;
+            ScreenRedoButtonPosition = null;
             HasAcknowledgedFeatureAnnouncement = false;
         }
     }
@@ -48,16 +58,19 @@ internal static class UndoAndRestartConfig
         int snapshotLimit,
         bool showActionHistoryOverlay,
         bool includeCardChoiceSnapshots,
-        bool enableMouseSideButtons)
+        bool enableMouseSideButtons,
+        bool enableScreenButtons)
     {
         int oldSnapshotLimit = SnapshotLimit;
         bool oldShowActionHistoryOverlay = ShowActionHistoryOverlay;
         bool oldIncludeCardChoiceSnapshots = IncludeCardChoiceSnapshots;
         bool oldEnableMouseSideButtons = EnableMouseSideButtons;
+        bool oldEnableScreenButtons = EnableScreenButtons;
         SnapshotLimit = Math.Max(0, snapshotLimit);
         ShowActionHistoryOverlay = showActionHistoryOverlay;
         IncludeCardChoiceSnapshots = includeCardChoiceSnapshots;
         EnableMouseSideButtons = enableMouseSideButtons;
+        EnableScreenButtons = enableScreenButtons;
         if (Save())
         {
             return true;
@@ -67,7 +80,36 @@ internal static class UndoAndRestartConfig
         ShowActionHistoryOverlay = oldShowActionHistoryOverlay;
         IncludeCardChoiceSnapshots = oldIncludeCardChoiceSnapshots;
         EnableMouseSideButtons = oldEnableMouseSideButtons;
+        EnableScreenButtons = oldEnableScreenButtons;
         return false;
+    }
+
+    public static bool SaveScreenButtonPositions(Vector2? undo, Vector2? redo)
+    {
+        Vector2? oldUndo = ScreenUndoButtonPosition;
+        Vector2? oldRedo = ScreenRedoButtonPosition;
+        ScreenUndoButtonPosition = undo;
+        ScreenRedoButtonPosition = redo;
+        if (Save())
+        {
+            return true;
+        }
+
+        ScreenUndoButtonPosition = oldUndo;
+        ScreenRedoButtonPosition = oldRedo;
+        return false;
+    }
+
+    private static Vector2? ToVector(float[]? value)
+    {
+        return value is { Length: 2 } && float.IsFinite(value[0]) && float.IsFinite(value[1])
+            ? new Vector2(Math.Clamp(value[0], 0f, 1f), Math.Clamp(value[1], 0f, 1f))
+            : null;
+    }
+
+    private static float[]? FromVector(Vector2? value)
+    {
+        return value is { } v ? new[] { v.X, v.Y } : null;
     }
 
     public static bool AcknowledgeFeatureAnnouncement()
@@ -93,6 +135,9 @@ internal static class UndoAndRestartConfig
                 ShowActionHistoryOverlay = ShowActionHistoryOverlay,
                 IncludeCardChoiceSnapshots = IncludeCardChoiceSnapshots,
                 EnableMouseSideButtons = EnableMouseSideButtons,
+                EnableScreenButtons = EnableScreenButtons,
+                ScreenUndoButtonPosition = FromVector(ScreenUndoButtonPosition),
+                ScreenRedoButtonPosition = FromVector(ScreenRedoButtonPosition),
                 HasAcknowledgedFeatureAnnouncement = HasAcknowledgedFeatureAnnouncement,
             }, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(ConfigPath, json);
@@ -111,6 +156,9 @@ internal static class UndoAndRestartConfig
         public bool ShowActionHistoryOverlay { get; set; } = true;
         public bool IncludeCardChoiceSnapshots { get; set; } = true;
         public bool EnableMouseSideButtons { get; set; }
+        public bool EnableScreenButtons { get; set; } = true;
+        public float[]? ScreenUndoButtonPosition { get; set; }
+        public float[]? ScreenRedoButtonPosition { get; set; }
         public bool HasAcknowledgedFeatureAnnouncement { get; set; }
     }
 }
