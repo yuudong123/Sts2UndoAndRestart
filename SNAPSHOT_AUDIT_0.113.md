@@ -98,3 +98,5 @@ restart and multiplayer blocking.
 - 33 headless scenarios pass on 0.113.1, including all twelve Dread dominions,
   Gambling Chip and the on-screen buttons. F5 restart itself is only covered
   in game.
+- Mod 0.113.1.2 hides the on-screen buttons on the frame the combat starts
+  ending instead of on the next history refresh.

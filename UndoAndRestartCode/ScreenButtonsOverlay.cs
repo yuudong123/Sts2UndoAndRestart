@@ -34,6 +34,7 @@ internal static class ScreenButtonsOverlay
     private static Button? _undoButton;
     private static Button? _redoButton;
     private static bool _loggedLayout;
+    private static bool _watchingFrames;
 
     private static readonly Dictionary<Button, VanillaSkin> Skins = new();
 
@@ -95,13 +96,25 @@ internal static class ScreenButtonsOverlay
         {
             return UndoAndRestartConfig.EnableScreenButtons &&
                    NGame.Instance != null &&
-                   CombatManager.Instance.IsInProgress &&
+                   !CombatManager.Instance.IsOverOrEnding &&
                    CombatManager.Instance.DebugOnlyGetState() != null &&
                    RunManager.Instance.IsSingleplayerOrFakeMultiplayer;
         }
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// The undo history only refreshes the buttons when it changes, so the end of
+    /// combat (last enemy down, death, escape) is caught here, on the frame it happens.
+    /// </summary>
+    private static void HideWhenCombatEnds()
+    {
+        if (_layer != null && GodotObject.IsInstanceValid(_layer) && _layer.Visible && !ShouldShow())
+        {
+            _layer.Visible = false;
         }
     }
 
@@ -123,6 +136,11 @@ internal static class ScreenButtonsOverlay
         _layer.AddChild(_undoButton);
         _layer.AddChild(_redoButton);
         NGame.Instance!.AddChild(_layer);
+        if (!_watchingFrames)
+        {
+            _watchingFrames = true;
+            NGame.Instance.GetTree().ProcessFrame += HideWhenCombatEnds;
+        }
     }
 
     /// <summary>
