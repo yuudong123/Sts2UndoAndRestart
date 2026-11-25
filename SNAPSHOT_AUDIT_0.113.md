@@ -100,3 +100,19 @@ restart and multiplayer blocking.
   in game.
 - Mod 0.113.1.2 hides the on-screen buttons on the frame the combat starts
   ending instead of on the next history refresh.
+
+## 0.114.0 Beta Patch
+
+- Game v0.114.0 (commit a7b9a9c0, build 26909018, sts2.dll SHA-256
+  ddceb879…826c5d). 209 decompiled files changed, mostly Fool cards, the
+  hotkey manager, damage results and saves.
+- Compile break: `ArrowStatus.Destroyed` and `ArrowSlot.DestroyAfterImpaled`
+  were removed (Quietus no longer destroys its arrow). The snapshot now keeps
+  only each arrow slot's status, and every slot on an Impaled power gets its
+  arrow back on restore.
+- All 213 Harmony targets and reflected names resolve as on 0.113.1.
+- `NHotkeyManager` now blocks hotkeys behind modals and the pause menu stack.
+  Undo reads its keys in `NGame._Input`, so this does not affect it.
+- 35 headless scenarios plus two new seeded random sessions over the Fool
+  card pool (`fuzz-fool-1`, `fuzz-fool-2`, with Twin Shot, Optimism, Growth,
+  Arrow Stab and Quietus among the drawn cards) pass on 0.114.0.

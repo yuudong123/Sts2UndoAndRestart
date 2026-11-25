@@ -16,6 +16,8 @@ internal static class UndoAndRestartConfig
     /// <summary>Dragged Undo button position as a fraction of the viewport; null = beside the energy orb.</summary>
     public static Vector2? ScreenUndoButtonPosition { get; private set; }
     public static Vector2? ScreenRedoButtonPosition { get; private set; }
+    /// <summary>Dragged top-bar restart button X as a fraction of the top bar width; null = left of the map button.</summary>
+    public static float? ScreenRestartButtonX { get; private set; }
     public static bool HasAcknowledgedFeatureAnnouncement { get; private set; }
 
     public static void Load()
@@ -37,6 +39,7 @@ internal static class UndoAndRestartConfig
             EnableScreenButtons = settings?.EnableScreenButtons ?? true;
             ScreenUndoButtonPosition = ToVector(settings?.ScreenUndoButtonPosition);
             ScreenRedoButtonPosition = ToVector(settings?.ScreenRedoButtonPosition);
+            ScreenRestartButtonX = settings?.ScreenRestartButtonX is { } x && float.IsFinite(x) ? Math.Clamp(x, 0f, 1f) : null;
             HasAcknowledgedFeatureAnnouncement =
                 settings?.HasAcknowledgedFeatureAnnouncement ?? false;
         }
@@ -50,6 +53,7 @@ internal static class UndoAndRestartConfig
             EnableScreenButtons = true;
             ScreenUndoButtonPosition = null;
             ScreenRedoButtonPosition = null;
+            ScreenRestartButtonX = null;
             HasAcknowledgedFeatureAnnouncement = false;
         }
     }
@@ -100,6 +104,32 @@ internal static class UndoAndRestartConfig
         return false;
     }
 
+    public static bool SaveScreenRestartButtonX(float? x)
+    {
+        float? old = ScreenRestartButtonX;
+        ScreenRestartButtonX = x;
+        if (Save())
+        {
+            return true;
+        }
+
+        ScreenRestartButtonX = old;
+        return false;
+    }
+
+    public static bool ResetScreenButtonPositions()
+    {
+        float? oldRestart = ScreenRestartButtonX;
+        ScreenRestartButtonX = null;
+        if (SaveScreenButtonPositions(null, null))
+        {
+            return true;
+        }
+
+        ScreenRestartButtonX = oldRestart;
+        return false;
+    }
+
     private static Vector2? ToVector(float[]? value)
     {
         return value is { Length: 2 } && float.IsFinite(value[0]) && float.IsFinite(value[1])
@@ -138,6 +168,7 @@ internal static class UndoAndRestartConfig
                 EnableScreenButtons = EnableScreenButtons,
                 ScreenUndoButtonPosition = FromVector(ScreenUndoButtonPosition),
                 ScreenRedoButtonPosition = FromVector(ScreenRedoButtonPosition),
+                ScreenRestartButtonX = ScreenRestartButtonX,
                 HasAcknowledgedFeatureAnnouncement = HasAcknowledgedFeatureAnnouncement,
             }, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(ConfigPath, json);
@@ -159,6 +190,7 @@ internal static class UndoAndRestartConfig
         public bool EnableScreenButtons { get; set; } = true;
         public float[]? ScreenUndoButtonPosition { get; set; }
         public float[]? ScreenRedoButtonPosition { get; set; }
+        public float? ScreenRestartButtonX { get; set; }
         public bool HasAcknowledgedFeatureAnnouncement { get; set; }
     }
 }

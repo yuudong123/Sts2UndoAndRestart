@@ -4,10 +4,10 @@
 
 `Undo And Restart` is a Slay the Spire 2 C# mod that adds undo, redo, floor restart, and an action history tab for combat.
 
-The current source targets STS2 `0.113.1` only. Older game versions must use a matching historical mod release.
+The current source targets STS2 `0.114.0` only. Older game versions must use a matching historical mod release.
 
 Mod versions follow `<game version>.<mod patch number>`. The first release for
-STS2 `0.113.1` is `0.113.1.1`; additional mod-only fixes increment the final
+STS2 `0.114.0` is `0.114.0.1`; additional mod-only fixes increment the final
 number. Every Workshop update note must state the supported game version. Before
 publishing an update note, verify the latest public and beta game versions and
 attach direct download links to their matching GitHub releases.
@@ -33,6 +33,8 @@ For <latest beta version> -> <matching GitHub release download URL>
 - The three hotkeys can be changed from the game's input settings screen.
 - An optional mod setting adds mouse side button controls alongside the keyboard hotkeys (`M4`: undo, `M5`: redo).
 - On-screen undo and redo buttons in the style of the end-turn button sit beside the energy orb, for touch screens and players without a keyboard. They are on by default, can be dragged anywhere, and can be reset or turned off in the mod settings.
+- With the same setting, a Restart Floor button in the end-turn button style sits in the top bar, left of the top-right icons. A click asks for confirmation; holding it lets you slide it along the top bar.
+- The pause menu has a Restart Floor entry above Abandon Run.
 - Used cards and potions can be viewed in a grid-based action history tab during combat.
 - Clicking an item in the action history tab restores the corresponding snapshot.
 - Card-selection screens can optionally be stored as undo/redo checkpoints. The option is enabled by default.
@@ -76,10 +78,10 @@ The broad refactoring pass, code specifications, and README were drafted with Co
 
 `Undo And Restart`는 Slay the Spire 2 전투 중 되돌리기, 다시 실행, 층 다시 시작, 사용 기록 탭을 추가하는 C# 모드입니다.
 
-현재 소스는 STS2 `0.113.1`만 지원합니다. 이전 게임 버전에서는 해당 버전에 맞는 과거 모드 릴리스를 사용해야 합니다.
+현재 소스는 STS2 `0.114.0`만 지원합니다. 이전 게임 버전에서는 해당 버전에 맞는 과거 모드 릴리스를 사용해야 합니다.
 
 모드 버전은 `<게임 버전>.<모드 패치 번호>` 형식을 사용합니다. STS2
-`0.113.1`의 첫 배포 버전은 `0.113.1.1`이며, 게임 버전이 그대로인 상태에서
+`0.114.0`의 첫 배포 버전은 `0.114.0.1`이며, 게임 버전이 그대로인 상태에서
 모드만 추가 수정하면 마지막 번호를 1씩 올립니다. 모든 창작마당 업데이트
 노트에는 지원하는 게임 버전을 명시합니다. 업데이트 노트를 게시하기 전에
 최신 public 및 beta 게임 버전을 확인하고, 각 버전에 맞는 GitHub 릴리스의
@@ -106,6 +108,8 @@ For <최신 beta 버전> -> <해당 GitHub 릴리스 다운로드 URL>
 - 게임의 입력 설정 화면에서 세 기능의 단축키를 직접 변경할 수 있습니다.
 - 모드 설정에서 키보드 단축키와 함께 사용할 마우스 옆 버튼 조작을 선택적으로 추가할 수 있습니다(`M4`: 되돌리기, `M5`: 다시 실행).
 - 터치 화면이나 키보드 없이 플레이하는 경우를 위해 에너지 옆에 턴 종료 버튼 모양의 되돌리기 / 다시 실행 화면 버튼이 표시됩니다. 기본값은 켜짐이며, 드래그로 옮길 수 있고 모드 설정에서 위치 초기화나 끄기를 할 수 있습니다.
+- 같은 설정으로 상단바의 우상단 아이콘 왼쪽에 턴 종료 버튼 모양의 층 다시 시작 버튼이 표시됩니다. 누르면 확인 창이 뜨고, 길게 누르면 상단바를 따라 옮길 수 있습니다.
+- 일시정지(ESC) 메뉴의 포기 버튼 위에 층 다시 시작 항목이 있습니다.
 - 전투 중 사용한 카드와 포션을 격자형 사용 기록 탭으로 볼 수 있습니다.
 - 사용 기록 탭에서 특정 항목을 클릭하면 해당 스냅샷으로 이동합니다.
 - 카드 선택창을 선택적으로 undo/redo 체크포인트에 포함할 수 있으며 기본값은 켜짐입니다.

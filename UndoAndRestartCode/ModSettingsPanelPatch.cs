@@ -152,12 +152,14 @@ internal static class ModSettingsPanelPatch
             Text = UndoText.ResetScreenButtonPositions,
             CustomMinimumSize = new Vector2(120f, 30f),
             FocusMode = Control.FocusModeEnum.None,
-            Disabled = UndoAndRestartConfig.ScreenUndoButtonPosition == null && UndoAndRestartConfig.ScreenRedoButtonPosition == null,
+            Disabled = UndoAndRestartConfig.ScreenUndoButtonPosition == null &&
+                       UndoAndRestartConfig.ScreenRedoButtonPosition == null &&
+                       UndoAndRestartConfig.ScreenRestartButtonX == null,
         };
         ApplyGameFont(resetPositionsButton, FontType.Bold);
         resetPositionsButton.Pressed += () =>
         {
-            if (UndoAndRestartConfig.SaveScreenButtonPositions(null, null))
+            if (UndoAndRestartConfig.ResetScreenButtonPositions())
             {
                 resetPositionsButton.Disabled = true;
                 ScreenButtonsOverlay.Refresh();

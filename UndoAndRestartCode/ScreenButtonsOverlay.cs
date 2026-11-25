@@ -56,6 +56,7 @@ internal static class ScreenButtonsOverlay
 
     public static void Refresh()
     {
+        TopBarRestartButton.Refresh();
         try
         {
             if (!ShouldShow())
@@ -291,9 +292,9 @@ internal static class ScreenButtonsOverlay
     {
         try
         {
-            Texture2D? slab = ResourceLoader.Load<Texture2D>(SlabTexturePath);
+            NinePatchRect? background = CreateSlab(new Vector2(ButtonWidth, ButtonHeight));
             Texture2D? arrow = ResourceLoader.Load<Texture2D>(ArrowTexturePath);
-            if (slab == null || arrow == null)
+            if (background == null || arrow == null)
             {
                 MainFile.Logger.Warn("Vanilla button textures not found; using the plain button style.");
                 return false;
@@ -311,18 +312,6 @@ internal static class ScreenButtonsOverlay
                 MouseFilter = Control.MouseFilterEnum.Ignore,
                 Size = new Vector2(ButtonWidth, ButtonHeight),
                 PivotOffset = new Vector2(ButtonWidth, ButtonHeight) / 2f,
-            };
-            float scale = ButtonHeight / SlabRegion.Size.Y;
-            NinePatchRect background = new()
-            {
-                Name = "Background",
-                Texture = slab,
-                RegionRect = SlabRegion,
-                PatchMarginLeft = SlabPointMargin,
-                PatchMarginRight = SlabPointMargin,
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-                Size = new Vector2(ButtonWidth / scale, SlabRegion.Size.Y),
-                Scale = new Vector2(scale, scale),
             };
             TextureRect icon = new()
             {
@@ -354,6 +343,38 @@ internal static class ScreenButtonsOverlay
             return false;
         }
     }
+
+    /// <summary>The end-turn slab as a nine-patch of the given on-screen size, or null if the game lacks it.</summary>
+    internal static NinePatchRect? CreateSlab(Vector2 size)
+    {
+        Texture2D? slab = ResourceLoader.Load<Texture2D>(SlabTexturePath);
+        if (slab == null)
+        {
+            return null;
+        }
+
+        NinePatchRect background = new()
+        {
+            Name = "Background",
+            Texture = slab,
+            RegionRect = SlabRegion,
+            PatchMarginLeft = SlabPointMargin,
+            PatchMarginRight = SlabPointMargin,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        ResizeSlab(background, size);
+        return background;
+    }
+
+    internal static void ResizeSlab(NinePatchRect background, Vector2 size)
+    {
+        float scale = size.Y / SlabRegion.Size.Y;
+        background.Size = new Vector2(size.X / scale, SlabRegion.Size.Y);
+        background.Scale = new Vector2(scale, scale);
+    }
+
+    /// <summary>On-screen width of one pointed end of the slab at the given height.</summary>
+    internal static float SlabEndWidth(float height) => SlabPointMargin * height / SlabRegion.Size.Y;
 
     /// <summary>Hover brightens like the end-turn button, a press sinks it, disabled greys it out.</summary>
     private static void UpdateSkin(Button button)
@@ -395,7 +416,7 @@ internal static class ScreenButtonsOverlay
     }
 
     /// <summary>Icons are embedded in the DLL, so the release zip layout stays the same.</summary>
-    private static Texture2D? LoadIcon(string file)
+    internal static Texture2D? LoadIcon(string file)
     {
         try
         {
@@ -424,7 +445,7 @@ internal static class ScreenButtonsOverlay
         }
     }
 
-    private static StyleBoxFlat CreateStyle(Color background, Color border)
+    internal static StyleBoxFlat CreateStyle(Color background, Color border)
     {
         return new StyleBoxFlat
         {
@@ -441,7 +462,7 @@ internal static class ScreenButtonsOverlay
         };
     }
 
-    private static void ApplyGameFont(Control control)
+    internal static void ApplyGameFont(Control control)
     {
         try
         {

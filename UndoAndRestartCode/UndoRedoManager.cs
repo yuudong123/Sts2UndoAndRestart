@@ -600,6 +600,12 @@ internal static class UndoRedoManager
 
     private static bool RequestMove(int direction)
     {
+        if (FloorRestartService.IsRestarting)
+        {
+            MainFile.Logger.Info("Undo/redo blocked: F5 quick restart in progress.");
+            return false;
+        }
+
         if (_navigationInProgress)
         {
             QueueNavigationMove(direction);
@@ -621,6 +627,12 @@ internal static class UndoRedoManager
 
     private static bool RequestRestore(UndoCheckpoint targetCheckpoint, string source)
     {
+        if (FloorRestartService.IsRestarting)
+        {
+            MainFile.Logger.Info($"Snapshot restore blocked via {source}: F5 quick restart in progress.");
+            return false;
+        }
+
         if (_navigationInProgress)
         {
             QueueNavigationCheckpoint(targetCheckpoint, source);

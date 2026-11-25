@@ -30,6 +30,8 @@ internal static class UndoText
     public static string InputUndo => Get("input_undo");
     public static string InputRedo => Get("input_redo");
     public static string InputRestart => Get("input_restart");
+    public static string RestartConfirmBody => Get("restart_confirm_body");
+    public static string RestartButtonTooltip => Get("restart_button_tooltip");
     public static string TurnStart => Get("turn_start");
     public static string NoTarget => Get("no_target");
     public static string RestartCombat => Get("restart_combat");

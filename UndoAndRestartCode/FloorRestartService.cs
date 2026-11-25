@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
@@ -12,6 +13,7 @@ using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Audio;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.Multiplayer;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Rooms;
@@ -25,10 +27,33 @@ namespace UndoAndRestartCode;
 internal static class FloorRestartService
 {
     private const string FadeTransitionPath = "res://materials/transitions/fade_transition_mat.tres";
+    private const string ConfirmTable = "main_menu_ui";
+    private const string ConfirmTitleKey = "UNDO_AND_RESTART_RESTART_CONFIRM.title";
+    private const string ConfirmBodyKey = "UNDO_AND_RESTART_RESTART_CONFIRM.body";
     private static bool _isRestarting;
+
+    public static bool IsRestarting => _isRestarting;
 
     public static bool HandleQuickRestartKey()
     {
+        if (!CanRestart(out string? reason))
+        {
+            if (reason != null)
+            {
+                MainFile.Logger.Info($"Ignored F5 quick restart request {reason}.");
+            }
+
+            return false;
+        }
+
+        TaskHelper.RunSafely(DoQuickRestart());
+        return true;
+    }
+
+    /// <summary>Whether a quick restart would start now; <paramref name="reason"/> is set for log-worthy refusals.</summary>
+    public static bool CanRestart(out string? reason)
+    {
+        reason = null;
         RunManager runManager = RunManager.Instance;
         if (_isRestarting || !runManager.IsInProgress)
         {
@@ -37,7 +62,7 @@ internal static class FloorRestartService
 
         if (runManager.NetService.Type != NetGameType.Singleplayer)
         {
-            MainFile.Logger.Info("Ignored F5 quick restart request during multiplayer.");
+            reason = "during multiplayer";
             return false;
         }
 
@@ -49,12 +74,53 @@ internal static class FloorRestartService
 
         if (HasPendingRestartWork(runManager))
         {
-            MainFile.Logger.Info("Ignored F5 quick restart request while a game action is in progress.");
+            reason = "while a game action is in progress";
             return false;
         }
 
-        TaskHelper.RunSafely(DoQuickRestart());
         return true;
+    }
+
+    /// <summary>
+    /// Restart from a button: asks first, because a click is easier to make by
+    /// accident than F5 and the floor's progress is lost.
+    /// </summary>
+    public static async Task ConfirmAndRestartAsync(Action? beforeRestart = null)
+    {
+        NModalContainer? modals = NModalContainer.Instance;
+        NGenericPopup? popup = modals == null || modals.OpenModal != null ? null : NGenericPopup.Create();
+        if (popup == null)
+        {
+            return;
+        }
+
+        LocManager.Instance.GetTable(ConfirmTable).MergeWith(new Dictionary<string, string>
+        {
+            [ConfirmTitleKey] = UndoText.InputRestart,
+            [ConfirmBodyKey] = UndoText.RestartConfirmBody,
+        });
+        modals!.Add(popup);
+        bool confirmed = await popup.WaitForConfirmation(
+            new LocString(ConfirmTable, ConfirmBodyKey),
+            new LocString(ConfirmTable, ConfirmTitleKey),
+            new LocString(ConfirmTable, "GENERIC_POPUP.cancel"),
+            new LocString(ConfirmTable, "GENERIC_POPUP.confirm"));
+        modals.Clear();
+        if (!confirmed)
+        {
+            return;
+        }
+
+        beforeRestart?.Invoke();
+
+        // Card plays and enemy turns keep going behind the popup; give them a moment.
+        SceneTree tree = NGame.Instance!.GetTree();
+        for (int frame = 0; frame < 180 && !CanRestart(out _); frame++)
+        {
+            await tree.ToSignal(tree, SceneTree.SignalName.ProcessFrame);
+        }
+
+        HandleQuickRestartKey();
     }
 
     private static async Task DoQuickRestart()
@@ -112,6 +178,9 @@ internal static class FloorRestartService
             List<(uint CombatId, Vector2 Position)> savedEnemyPositions = CaptureEnemyPositions();
 
             MainFile.Logger.Info("Cleaning up current run scene for F5 quick restart.");
+            // An undo or redo accepted just before F5 runs on a deferred call and
+            // would otherwise restore the old combat while it fades out.
+            UndoRedoManager.Reset();
             CombatRuntimeStateCleanup.ClearCombatTurnFlags();
             runManager.ActionQueueSet.Reset();
             NRunMusicController.Instance?.StopMusic();

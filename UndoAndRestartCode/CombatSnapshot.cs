@@ -790,7 +790,7 @@ internal sealed class CombatSnapshot
                 {
                     foreach (ArrowSlot slot in power.Arrows)
                     {
-                        if (slot.Status != ArrowStatus.Destroyed && NImpaledArrowVfx.Create(creature, slot) is { } arrow)
+                        if (NImpaledArrowVfx.Create(creature, slot) is { } arrow)
                         {
                             node.Visuals.AddChildSafely(arrow);
                         }
@@ -1880,7 +1880,7 @@ internal sealed class CombatSnapshot
         private readonly int _orbCapacity;
         private readonly List<Creature> _pets;
         private readonly List<ArrowSlot> _arrows;
-        private readonly List<(ArrowStatus Status, bool DestroyAfterImpaled)> _arrowStates;
+        private readonly List<ArrowStatus> _arrowStates;
         private readonly Dictionary<PileType, List<CardModel>> _piles;
         private readonly PlayerTurnPhase? _phase;
         private readonly int _gold;
@@ -1934,7 +1934,7 @@ internal sealed class CombatSnapshot
             _orbCapacity = player.PlayerCombatState?.OrbQueue.Capacity ?? 0;
             _pets = player.PlayerCombatState?.Pets.ToList() ?? new List<Creature>();
             _arrows = player.PlayerCombatState?.Arrows.ToList() ?? new List<ArrowSlot>();
-            _arrowStates = _arrows.Select(arrow => (arrow.Status, arrow.DestroyAfterImpaled)).ToList();
+            _arrowStates = _arrows.Select(arrow => arrow.Status).ToList();
             _piles = player.Piles.ToDictionary(pile => pile.Type, pile => pile.Cards.ToList());
         }
 
@@ -1994,8 +1994,7 @@ internal sealed class CombatSnapshot
             ReflectionUtil.ReplaceList(live, _arrows);
             for (int i = 0; i < _arrows.Count; i++)
             {
-                ReflectionUtil.SetRequiredField(_arrows[i], "_status", _arrowStates[i].Status);
-                _arrows[i].DestroyAfterImpaled = _arrowStates[i].DestroyAfterImpaled;
+                ReflectionUtil.SetRequiredField(_arrows[i], "_status", _arrowStates[i]);
             }
         }
 
