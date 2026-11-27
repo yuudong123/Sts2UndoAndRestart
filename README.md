@@ -1,5 +1,20 @@
 # Undo And Restart
 
+> [!IMPORTANT]
+> **Notice: Steam Workshop page removed**
+>
+> As of 0.114 update day, this mod has been taken down from the Steam Workshop following a report.
+> I believe the removal was made in error, and I have filed an appeal with Steam. Until it is resolved,
+> Workshop subscribers may find the mod missing or no longer updating.
+>
+> **What you can do:**
+> - Download the latest version from the [Releases](../../releases) page and install it manually
+>   (place the `.jar` in your `Slay the Spire/mods` folder and launch through ModTheSpire).
+> - Your existing save files should not be affected.
+>
+> I'm sorry for the inconvenience and will post updates here. Thank you for your patience and support.
+
+
 ## English
 
 `Undo And Restart` is a Slay the Spire 2 C# mod that adds undo, redo, floor restart, and an action history tab for combat.
