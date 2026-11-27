@@ -1,16 +1,17 @@
 # Undo And Restart
 
 > [!IMPORTANT]
-> **Notice: Steam Workshop page removed**
+> **Notice: Steam Workshop page hidden (under moderator review)**
 >
-> As of 0.114 update day, this mod has been taken down from the Steam Workshop following a report.
-> I believe the removal was made in error, and I have filed an appeal with Steam. Until it is resolved,
-> Workshop subscribers may find the mod missing or no longer updating.
+> Since the 0.114 update day, this mod has been hidden from the Steam Workshop and marked as under moderator review.
+> The latest update only adds support for the 0.114 game patch, and every code change is public in this repository.
+> Steam Support told me that Workshop moderation for this game isn't handled by Steam, so I'm reaching out to the game's team to get it reviewed.
+> Until then, Workshop subscribers may find the mod missing from their subscriptions and can't receive the 0.114 fix.
 >
 > **What you can do:**
-> - Download the latest version from the [Releases](../../releases) page and install it manually
->   (place the `.jar` in your `Slay the Spire/mods` folder and launch through ModTheSpire).
-> - Your existing save files should not be affected.
+> - Download the release that matches your game version from the [Releases](../../releases) page.
+>   For STS2 `0.114.0`, use [`UndoAndRestart-0.114.0.1.zip`](https://github.com/yuudong123/Sts2UndoAndRestart/releases/download/v0.114.0.1/UndoAndRestart-0.114.0.1.zip).
+> - Extract the zip into the `mods` folder inside your Slay the Spire 2 install folder (create the folder if it doesn't exist), then launch the game.
 >
 > I'm sorry for the inconvenience and will post updates here. Thank you for your patience and support.
 
